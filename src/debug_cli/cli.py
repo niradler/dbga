@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from debug_cli.commands import run as run_cmd
+from debug_cli.commands import watch as watch_cmd
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version="0.1.0")
     subparsers = parser.add_subparsers(dest="command", required=True)
     run_cmd.add_subparser(subparsers)
+    watch_cmd.add_subparser(subparsers)
     return parser
 
 
