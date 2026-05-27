@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # Matches the standard "  File "...", line N, in func" header.
 _FRAME_RE = re.compile(r'^\s*File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<func>.+)$')
@@ -19,7 +20,8 @@ _ERROR_RE = re.compile(
 
 # pytest-style error line: "E   ExceptionType: message"
 _PYTEST_ERROR_RE = re.compile(
-    r"^E\s+(?P<type>[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt))(?::\s*(?P<msg>.*))?$"
+    r"^E\s+(?P<type>[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt))"
+    r"(?::\s*(?P<msg>.*))?$"
 )
 
 _CHAINED_DIVIDERS = (
@@ -195,3 +197,28 @@ def parse_traceback(text: str) -> ParsedTraceback:
     outermost.chained = list(reversed(parsed_segments[:-1]))
     outermost.raw = text
     return outermost
+
+
+def attach_source(
+    parsed: ParsedTraceback,
+    *,
+    context_lines: int = 2,
+    cwd: Path | None = None,
+) -> None:
+    """Fill `code_context` for every frame (recursing into chained tracebacks)."""
+    base = cwd if cwd is not None else Path.cwd()
+    for frame in parsed.frames:
+        path = Path(frame.file)
+        if not path.is_absolute():
+            path = base / path
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        lines = text.splitlines()
+        start = max(0, frame.line - 1 - context_lines)
+        end = min(len(lines), frame.line + context_lines)
+        frame.code_context = lines[start:end]
+
+    for child in parsed.chained:
+        attach_source(child, context_lines=context_lines, cwd=cwd)

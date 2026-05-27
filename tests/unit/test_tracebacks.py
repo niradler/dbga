@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from debug_cli.core.tracebacks import ParsedTraceback, parse_traceback
+from debug_cli.core.tracebacks import ParsedTraceback, attach_source, parse_traceback
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tracebacks"
 
@@ -76,3 +76,27 @@ def test_deepest_user_frame_skips_windows_lib() -> None:
     parsed = parse_traceback(text)
     assert parsed.deepest_user_frame is not None
     assert parsed.deepest_user_frame.file == "src/app.py"
+
+
+def test_attach_source_fills_context(tmp_path: Path) -> None:
+    target = tmp_path / "demo.py"
+    target.write_text("a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n")
+    parsed = parse_traceback(
+        f"Traceback (most recent call last):\n"
+        f'  File "{target}", line 3, in <module>\n'
+        f"    c = 3\n"
+        f"ValueError: x\n"
+    )
+    attach_source(parsed, context_lines=1)
+    assert parsed.frames[0].code_context == ["b = 2", "c = 3", "d = 4"]
+
+
+def test_attach_source_swallows_missing_files() -> None:
+    parsed = parse_traceback(
+        "Traceback (most recent call last):\n"
+        '  File "definitely_not_a_real_file_xyz.py", line 3, in <module>\n'
+        "    c = 3\n"
+        "ValueError: x\n"
+    )
+    attach_source(parsed)
+    assert parsed.frames[0].code_context == []
