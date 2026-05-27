@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from debug_cli.commands import localize as localize_cmd
 from debug_cli.commands import run as run_cmd
 from debug_cli.commands import watch as watch_cmd
 
@@ -16,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     run_cmd.add_subparser(subparsers)
     watch_cmd.add_subparser(subparsers)
+    localize_cmd.add_subparser(subparsers)
     return parser
 
 
