@@ -53,6 +53,20 @@ class DapSession:
         self._exit_code: int | None = None
         self._listen_port: int | None = None  # reserved for Phase 10 (attach)
 
+    # ---- introspection -------------------------------------------------------
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    @property
+    def current_thread_id(self) -> int | None:
+        return self._current_thread_id
+
+    @property
+    def client(self) -> DapClient | None:
+        return self._client
+
     # ---- lifecycle -----------------------------------------------------------
 
     def start(
