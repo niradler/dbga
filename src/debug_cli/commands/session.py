@@ -98,6 +98,93 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
     _add_common_flags(p_stop)
     p_stop.set_defaults(func=cmd_release)
 
+    p_eval = sub.add_parser("eval", help="Evaluate a Python expression in the current frame.")
+    p_eval.add_argument("--expr", required=True, help="Expression to evaluate.")
+    p_eval.add_argument("--frame", type=int, default=None, help="Frame id (default: current top).")
+    _add_common_flags(p_eval)
+    p_eval.set_defaults(func=cmd_eval)
+
+    p_continue = sub.add_parser("continue", help="Resume execution until next stop.")
+    p_continue.add_argument(
+        "--break",
+        action="append",
+        default=[],
+        dest="break_add",
+        metavar="FILE:LINE[:COND]",
+        help="Add a breakpoint before continuing. Repeatable.",
+    )
+    p_continue.add_argument(
+        "--remove-break",
+        action="append",
+        default=[],
+        dest="break_remove",
+        metavar="FILE:LINE",
+        help="Remove a breakpoint before continuing. Repeatable.",
+    )
+    p_continue.add_argument(
+        "--to",
+        default=None,
+        metavar="FILE:LINE",
+        help="Temporary breakpoint at this location, removed after stop.",
+    )
+    p_continue.add_argument(
+        "--break-on-exception",
+        action="append",
+        default=[],
+        dest="exc_filters",
+        metavar="FILTER",
+        help="Exception filter (e.g. 'raised', 'uncaught'). Repeatable.",
+    )
+    _add_common_flags(p_continue)
+    p_continue.set_defaults(func=cmd_continue)
+
+    p_step = sub.add_parser("step", help="Step one source line.")
+    p_step.add_argument(
+        "--mode",
+        choices=("in", "out", "over"),
+        default="over",
+        help="Step mode (default: over).",
+    )
+    _add_common_flags(p_step)
+    p_step.set_defaults(func=cmd_step)
+
+    p_pause = sub.add_parser("pause", help="Interrupt a running debuggee.")
+    _add_common_flags(p_pause)
+    p_pause.set_defaults(func=cmd_pause)
+
+    p_output = sub.add_parser("output", help="Drain buffered stdout/stderr from the debuggee.")
+    p_output.add_argument(
+        "--since-last-stop",
+        action="store_true",
+        help="Only return output emitted since the most recent stop.",
+    )
+    p_output.add_argument(
+        "--lines",
+        type=int,
+        default=None,
+        help="Limit output to the last N lines.",
+    )
+    _add_common_flags(p_output)
+    p_output.set_defaults(func=cmd_output)
+
+    p_setbp = sub.add_parser("set-bp", help="Add a breakpoint.")
+    p_setbp.add_argument("spec", metavar="FILE:LINE[:CONDITION]")
+    _add_common_flags(p_setbp)
+    p_setbp.set_defaults(func=cmd_set_bp)
+
+    p_clearbp = sub.add_parser("clear-bp", help="Remove a breakpoint by file:line.")
+    p_clearbp.add_argument("spec", metavar="FILE:LINE")
+    _add_common_flags(p_clearbp)
+    p_clearbp.set_defaults(func=cmd_clear_bp)
+
+    p_listbp = sub.add_parser("list-bp", help="List all tracked breakpoints.")
+    _add_common_flags(p_listbp)
+    p_listbp.set_defaults(func=cmd_list_bp)
+
+    p_restart = sub.add_parser("restart", help="Re-launch the debuggee, preserving breakpoints.")
+    _add_common_flags(p_restart)
+    p_restart.set_defaults(func=cmd_restart)
+
 
 # ---- emit helpers -----------------------------------------------------------
 
@@ -138,14 +225,72 @@ def _parse_break_at(value: str) -> tuple[Path, int] | None:
 # ---- wire helpers -----------------------------------------------------------
 
 
-def _request(port: int, command: str, *, timeout: float = 30.0) -> dict[str, Any]:
+def _request(
+    port: int,
+    command: str,
+    *,
+    args: dict[str, Any] | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
         sock.settimeout(timeout)
-        control_proto.send(sock, {"command": command})
+        payload: dict[str, Any] = {"command": command}
+        if args is not None:
+            payload["args"] = args
+        control_proto.send(sock, payload)
         resp = control_proto.recv(sock)
     if resp is None:
         return {"status": "error", "error_type": "protocol", "message": "empty response"}
     return resp
+
+
+def _call_daemon(
+    args: argparse.Namespace,
+    command: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    timeout: float = 60.0,
+) -> int:
+    """Resolve the live session, send one command, emit the result.
+
+    Returns the CLI exit code: 0 on success, 1 if the daemon returned an
+    error, 2 for client-side failures (no session, dead daemon, transport).
+    """
+    cwd = _resolve_cwd(args)
+    meta_path = session_dir(cwd, args.session) / "meta.json"
+
+    meta = _read_meta(meta_path)
+    if meta is None:
+        _emit_error(args, f"no session named {args.session!r}", error_type="no_session")
+        return 2
+
+    pid = meta.get("pid")
+    if not isinstance(pid, int) or not is_pid_alive(pid):
+        shutil.rmtree(meta_path.parent, ignore_errors=True)
+        _emit_error(args, "session daemon is not running", error_type="dead_session")
+        return 2
+
+    control_port = meta.get("control_port")
+    if not isinstance(control_port, int):
+        _emit_error(args, "session meta has no control_port", error_type="dead_session")
+        return 2
+
+    try:
+        resp = _request(int(control_port), command, args=payload, timeout=timeout)
+    except (OSError, TimeoutError) as exc:
+        _emit_error(args, f"failed to talk to session daemon: {exc}", error_type="daemon_failed")
+        return 2
+
+    if resp.get("status") != "ok":
+        _emit(args, resp)
+        return 1
+
+    result = resp.get("result")
+    if not isinstance(result, dict):
+        _emit_error(args, "malformed daemon response", error_type="protocol")
+        return 2
+    _emit(args, result)
+    return 0
 
 
 # ---- meta.json helpers ------------------------------------------------------
@@ -298,42 +443,110 @@ def _terminate_daemon(pid: int) -> None:
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
+    return _call_daemon(args, "inspect", timeout=30.0)
+
+
+def cmd_eval(args: argparse.Namespace) -> int:
+    return _call_daemon(
+        args,
+        "eval",
+        {"expression": args.expr, "frame": args.frame},
+        timeout=60.0,
+    )
+
+
+def cmd_continue(args: argparse.Namespace) -> int:
+    return _call_daemon(
+        args,
+        "continue",
+        {
+            "add_bps": list(args.break_add or []),
+            "remove_bps": list(args.break_remove or []),
+            "to": args.to,
+            "exception_filters": list(args.exc_filters or []),
+        },
+        timeout=120.0,
+    )
+
+
+def cmd_step(args: argparse.Namespace) -> int:
+    return _call_daemon(args, "step", {"mode": args.mode}, timeout=60.0)
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    return _call_daemon(args, "pause", {}, timeout=30.0)
+
+
+def cmd_output(args: argparse.Namespace) -> int:
+    return _call_daemon(
+        args,
+        "output",
+        {"since_last_stop": bool(args.since_last_stop), "lines": args.lines},
+        timeout=10.0,
+    )
+
+
+def cmd_set_bp(args: argparse.Namespace) -> int:
+    parsed = _parse_bp_with_condition(args.spec)
+    if parsed is None:
+        _emit_error(args, f"invalid spec {args.spec!r}; expected <file>:<line>[:condition]")
+        return 2
+    file, line, cond = parsed
     cwd = _resolve_cwd(args)
-    sdir = session_dir(cwd, args.session)
-    meta_path = sdir / "meta.json"
+    file_abs = (cwd / file).resolve() if not file.is_absolute() else file.resolve()
+    return _call_daemon(
+        args,
+        "set_bp",
+        {"file": str(file_abs), "line": line, "condition": cond},
+        timeout=30.0,
+    )
 
-    meta = _read_meta(meta_path)
-    if meta is None:
-        _emit_error(args, f"no session named {args.session!r}", error_type="no_session")
+
+def cmd_clear_bp(args: argparse.Namespace) -> int:
+    parsed = _parse_break_at(args.spec)
+    if parsed is None:
+        _emit_error(args, f"invalid spec {args.spec!r}; expected <file>:<line>")
         return 2
+    file, line = parsed
+    cwd = _resolve_cwd(args)
+    file_abs = (cwd / file).resolve() if not file.is_absolute() else file.resolve()
+    return _call_daemon(
+        args,
+        "clear_bp",
+        {"file": str(file_abs), "line": line},
+        timeout=30.0,
+    )
 
-    pid = meta.get("pid")
-    if not isinstance(pid, int) or not is_pid_alive(pid):
-        shutil.rmtree(sdir, ignore_errors=True)
-        _emit_error(args, "session daemon is not running", error_type="dead_session")
-        return 2
 
-    control_port = meta.get("control_port")
-    if not isinstance(control_port, int):
-        _emit_error(args, "session meta has no control_port", error_type="dead_session")
-        return 2
+def cmd_list_bp(args: argparse.Namespace) -> int:
+    return _call_daemon(args, "list_bp", {}, timeout=10.0)
 
+
+def cmd_restart(args: argparse.Namespace) -> int:
+    return _call_daemon(args, "restart", {}, timeout=120.0)
+
+
+def _parse_bp_with_condition(value: str) -> tuple[Path, int, str | None] | None:
+    """Parse ``FILE:LINE[:CONDITION]`` — splits from the right to handle drive letters."""
+    head, sep, tail = value.rpartition(":")
+    if not sep:
+        return None
     try:
-        resp = _request(control_port, "inspect", timeout=30.0)
-    except (OSError, TimeoutError) as exc:
-        _emit_error(args, f"failed to talk to session daemon: {exc}", error_type="daemon_failed")
-        return 2
-
-    if resp.get("status") != "ok":
-        _emit(args, resp)
-        return 2
-
-    result = resp.get("result")
-    if not isinstance(result, dict):
-        _emit_error(args, "malformed daemon response", error_type="protocol")
-        return 2
-    _emit(args, result)
-    return 0
+        line = int(tail)
+        condition: str | None = None
+    except ValueError:
+        condition = tail
+        head2, sep2, tail2 = head.rpartition(":")
+        if not sep2:
+            return None
+        try:
+            line = int(tail2)
+        except ValueError:
+            return None
+        head = head2
+    if line < 1:
+        return None
+    return Path(head), line, condition
 
 
 # ---- release / stop ---------------------------------------------------------

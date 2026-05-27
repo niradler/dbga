@@ -49,6 +49,7 @@ class DapSession:
         self._adapter_proc: subprocess.Popen[bytes] | None = None
         self._current_thread_id: int | None = None
         self._output_buffer: list[str] = []
+        self._last_stop_output_pos: int = 0  # char offset into joined buffer at last stop
         self._warnings: list[str] = []
         self._exit_code: int | None = None
         self._listen_port: int | None = None  # reserved for Phase 10 (attach)
@@ -267,9 +268,22 @@ class DapSession:
         return truncate_value(value, variables_reference=ref)
 
     def drain_output(self) -> str:
-        out = "".join(self._output_buffer)
-        self._output_buffer.clear()
-        return out
+        """Return all buffered output and clear the buffer. Resets stop marker."""
+        return self.read_output(drain=True, since_last_stop=False)
+
+    def read_output(self, *, drain: bool = True, since_last_stop: bool = False) -> str:
+        """Return buffered output.
+
+        ``since_last_stop`` returns only what was emitted since the last stop
+        event was surfaced via :meth:`_build_stopped_context`. ``drain``
+        empties the buffer (and resets the stop marker) after reading.
+        """
+        flat = "".join(self._output_buffer)
+        result = flat[self._last_stop_output_pos :] if since_last_stop else flat
+        if drain:
+            self._output_buffer.clear()
+            self._last_stop_output_pos = 0
+        return result
 
     # ---- internals -----------------------------------------------------------
 
@@ -284,7 +298,10 @@ class DapSession:
     def _build_stopped_context(self, reason: str) -> StoppedContext:
         client = self._require_client()
         thread_id = self._require_thread_id()
-        recent = "".join(self._output_buffer)
+        flat = "".join(self._output_buffer)
+        # Surface only the output that arrived since the previous stop —
+        # otherwise every stopped context would re-report the same history.
+        recent = flat[self._last_stop_output_pos :]
         # Snapshot warnings so each context reports any breakpoint issues
         # accumulated so far, then clear so we don't repeat them forever.
         warnings = list(self._warnings)
@@ -298,15 +315,17 @@ class DapSession:
             recent_output=recent,
             warnings=warnings,
         )
-        # The output we just embedded into the context has been consumed;
-        # drop it so a follow-up drain_output() doesn't return it again.
-        self._output_buffer.clear()
+        # Advance the stop marker so the next stop reports only new output.
+        # The buffer itself is NOT cleared: ``session output`` drains it on
+        # demand and ``release`` drains anything unconsumed at teardown.
+        self._last_stop_output_pos = len(flat)
         return ctx
 
     def _terminal_context(self) -> StoppedContext:
         status = "exited" if self._exit_code is not None else "terminated"
-        recent = "".join(self._output_buffer)
-        self._output_buffer.clear()
+        flat = "".join(self._output_buffer)
+        recent = flat[self._last_stop_output_pos :]
+        self._last_stop_output_pos = len(flat)
         warnings = list(self._warnings)
         self._warnings.clear()
         return StoppedContext(
