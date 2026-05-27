@@ -1,0 +1,4 @@
+  File "src/bad.py", line 3
+    def foo(:
+            ^
+SyntaxError: invalid syntax

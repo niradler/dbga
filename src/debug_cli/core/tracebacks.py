@@ -6,9 +6,20 @@ from dataclasses import dataclass, field
 # Matches the standard "  File "...", line N, in func" header.
 _FRAME_RE = re.compile(r'^\s*File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<func>.+)$')
 
+# SyntaxError header has no ", in <func>" suffix.
+_FRAME_NO_FUNC_RE = re.compile(r'^\s*File "(?P<file>[^"]+)", line (?P<line>\d+)$')
+
+# pytest --tb=short style: "path/to/file.py:12: in test_bar"
+_PYTEST_FRAME_RE = re.compile(r"^(?P<file>[^\s:][^:]*):(?P<line>\d+):\s*in\s+(?P<func>\S+)$")
+
 # Standard error line: "ExceptionType: message"
 _ERROR_RE = re.compile(
     r"^(?P<type>[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt))(?::\s*(?P<msg>.*))?$"
+)
+
+# pytest-style error line: "E   ExceptionType: message"
+_PYTEST_ERROR_RE = re.compile(
+    r"^E\s+(?P<type>[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt))(?::\s*(?P<msg>.*))?$"
 )
 
 _CHAINED_DIVIDERS = (
@@ -66,8 +77,8 @@ def _next_code_line(lines: list[str], i: int, skip_patterns: tuple[re.Pattern[st
     return nxt.strip()
 
 
-def _parse_segment(text: str) -> ParsedTraceback:
-    """Parse a single (non-chained) traceback segment."""
+def _parse_standard_segment(text: str) -> ParsedTraceback:
+    """Parse a single (non-chained) traceback segment using the standard format."""
     parsed = ParsedTraceback(raw=text)
     lines = text.splitlines()
     i = 0
@@ -76,12 +87,27 @@ def _parse_segment(text: str) -> ParsedTraceback:
 
         m = _FRAME_RE.match(line)
         if m:
-            code = _next_code_line(lines, i, (_FRAME_RE,))
+            code = _next_code_line(lines, i, (_FRAME_RE, _FRAME_NO_FUNC_RE))
             parsed.frames.append(
                 TracebackFrame(
                     file=m.group("file"),
                     line=int(m.group("line")),
                     func=m.group("func"),
+                    code=code,
+                )
+            )
+            i += 2 if code else 1
+            continue
+
+        m2 = _FRAME_NO_FUNC_RE.match(line)
+        if m2:
+            # SyntaxError-style header (no "in <func>"). Synthesize func="<module>".
+            code = _next_code_line(lines, i, (_FRAME_RE, _FRAME_NO_FUNC_RE))
+            parsed.frames.append(
+                TracebackFrame(
+                    file=m2.group("file"),
+                    line=int(m2.group("line")),
+                    func="<module>",
                     code=code,
                 )
             )
@@ -95,6 +121,48 @@ def _parse_segment(text: str) -> ParsedTraceback:
 
         i += 1
 
+    return parsed
+
+
+def _parse_pytest_short_segment(text: str) -> ParsedTraceback:
+    """Parse a pytest --tb=short style segment."""
+    parsed = ParsedTraceback(raw=text)
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _PYTEST_FRAME_RE.match(line)
+        if m:
+            code = _next_code_line(lines, i, (_PYTEST_FRAME_RE, _PYTEST_ERROR_RE))
+            parsed.frames.append(
+                TracebackFrame(
+                    file=m.group("file"),
+                    line=int(m.group("line")),
+                    func=m.group("func"),
+                    code=code,
+                )
+            )
+            i += 2 if code else 1
+            continue
+
+        merr = _PYTEST_ERROR_RE.match(line)
+        if merr and not parsed.error_type:
+            parsed.error_type = merr.group("type")
+            parsed.message = (merr.group("msg") or "").strip()
+
+        i += 1
+
+    return parsed
+
+
+def _parse_segment(text: str) -> ParsedTraceback:
+    """Parse one segment, trying standard format first and falling back to pytest-short."""
+    parsed = _parse_standard_segment(text)
+    if not parsed.frames:
+        pytest_parsed = _parse_pytest_short_segment(text)
+        if pytest_parsed.frames:
+            parsed = pytest_parsed
+            parsed.raw = text
     parsed.deepest_user_frame = _find_deepest_user_frame(parsed.frames)
     return parsed
 

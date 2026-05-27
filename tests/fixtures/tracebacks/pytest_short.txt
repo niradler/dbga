@@ -1,0 +1,5 @@
+tests/test_foo.py:12: in test_bar
+    assert compute(2) == 5
+src/foo.py:7: in compute
+    return x / 0
+E   ZeroDivisionError: division by zero

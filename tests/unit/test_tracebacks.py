@@ -28,6 +28,28 @@ def test_parse_chained_traceback() -> None:
     assert parsed.chained[0].error_type == "ValueError"
 
 
+def test_parse_syntax_error() -> None:
+    text = (FIXTURES / "syntax_error.txt").read_text()
+    parsed = parse_traceback(text)
+    assert parsed.error_type == "SyntaxError"
+    assert parsed.message == "invalid syntax"
+    assert len(parsed.frames) == 1
+    assert parsed.frames[0].file == "src/bad.py"
+    assert parsed.frames[0].line == 3
+    assert parsed.frames[0].func == "<module>"
+
+
+def test_parse_pytest_short() -> None:
+    text = (FIXTURES / "pytest_short.txt").read_text()
+    parsed = parse_traceback(text)
+    assert parsed.error_type == "ZeroDivisionError"
+    assert parsed.message == "division by zero"
+    assert len(parsed.frames) == 2
+    assert parsed.frames[0].file == "tests/test_foo.py"
+    assert parsed.frames[0].line == 12
+    assert parsed.frames[0].func == "test_bar"
+
+
 def test_deepest_user_frame_skips_site_packages() -> None:
     text = (
         "Traceback (most recent call last):\n"
