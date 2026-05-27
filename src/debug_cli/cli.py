@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from debug_cli.commands import run as run_cmd
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -10,11 +12,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Evidence-first Python debugger CLI for AI agents.",
     )
     parser.add_argument("--version", action="version", version="0.1.0")
-    parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    run_cmd.add_subparser(subparsers)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    parser.parse_args(argv if argv is not None else sys.argv[1:])
-    return 0
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    return int(args.func(args))
