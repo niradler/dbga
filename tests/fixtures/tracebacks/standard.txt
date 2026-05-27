@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "src/app.py", line 42, in process_items
+    result = transform(item)
+  File "src/lib/util.py", line 10, in transform
+    return 1 / item["x"]
+ZeroDivisionError: division by zero
