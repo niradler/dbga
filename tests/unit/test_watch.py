@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from debug_cli.core.watch import WatchMatch, scan_file
+from debug_cli.core.watch import WatchMatch, scan_file, scan_process
 
 
 def test_scan_file_finds_pattern(tmp_path: Path) -> None:
@@ -14,3 +15,15 @@ def test_scan_file_finds_pattern(tmp_path: Path) -> None:
     assert matches[0].line_number == 2
     assert matches[0].groups == ("boom",)
     assert matches[1].line_number == 4
+
+
+def test_scan_process_collects_matches() -> None:
+    matches = list(
+        scan_process(
+            [sys.executable, "-u", "-c", "print('a'); print('ERROR b'); print('c')"],
+            patterns=[r"ERROR (\w+)"],
+            timeout=5.0,
+        )
+    )
+    assert len(matches) == 1
+    assert matches[0].groups == ("b",)

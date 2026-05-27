@@ -40,7 +40,7 @@ def run_with_timeout(
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        _kill_tree(proc.pid)
+        kill_tree(proc.pid)
         stdout, stderr = proc.communicate()
     duration_ms = int((time.monotonic() - start) * 1000)
     return RunResult(
@@ -59,7 +59,7 @@ def _creation_flags() -> int:
     return 0
 
 
-def _kill_tree(pid: int) -> None:
+def kill_tree(pid: int) -> None:
     if sys.platform == "win32":
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(pid)],
