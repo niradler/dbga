@@ -134,6 +134,12 @@ def _handle_request(state: _SessionState, req: dict[str, Any]) -> dict[str, Any]
             "error_type": "unknown_command",
             "message": f"unknown command: {command!r}",
         }
+    # Per-request override of the source-window size used by any context
+    # this handler builds. We persist the new value on the session so that
+    # ``inspect`` and subsequent stops keep the caller's preference.
+    raw_cl = args.get("context_lines")
+    if isinstance(raw_cl, int) and raw_cl >= 0:
+        state.session.set_source_context_lines(raw_cl)
     try:
         return handler(state, args)
     except DapError as exc:
@@ -359,8 +365,8 @@ def _handle_set_bp(state: _SessionState, args: dict[str, Any]) -> dict[str, Any]
     existing = [b for b in state.bps_by_file.get(key, []) if b.line != bp.line]
     existing.append(bp)
     state.bps_by_file[key] = existing
-    dap_bps = state.session.set_breakpoints(key, existing)
-    return {"status": "ok", "result": {"breakpoints": dap_bps}}
+    dap_bps, warnings = state.session.set_breakpoints_with_warnings(key, existing)
+    return {"status": "ok", "result": {"breakpoints": dap_bps, "warnings": warnings}}
 
 
 def _handle_clear_bp(state: _SessionState, args: dict[str, Any]) -> dict[str, Any]:
@@ -400,7 +406,10 @@ def _handle_restart(state: _SessionState, _args: dict[str, Any]) -> dict[str, An
     with contextlib.suppress(Exception):
         state.session.release()
 
-    new_session = DapSession(session_id=str(meta.get("session_id", "default")))
+    new_session = DapSession(
+        session_id=str(meta.get("session_id", "default")),
+        source_context_lines=state.session.source_context_lines,
+    )
     script_path = Path(str(meta["script"]))
     cwd_value = meta.get("cwd")
     cwd_path = Path(str(cwd_value)) if cwd_value else None
@@ -468,6 +477,7 @@ def _build_inspect_context(state: _SessionState) -> StoppedContext:
         thread_id,
         reason="inspect",
         session_id=session.session_id,
+        source_context_lines=session.source_context_lines,
         recent_output="",
         warnings=[],
     )
@@ -619,7 +629,10 @@ def main(meta_path: Path) -> int:
             },
         )
 
-        session = DapSession(session_id=str(meta.get("session_id", "default")))
+        session = DapSession(
+            session_id=str(meta.get("session_id", "default")),
+            source_context_lines=int(meta.get("source_context_lines") or 5),
+        )
         script_path = Path(str(meta["script"]))
         cwd_value = meta.get("cwd")
         cwd_path = Path(str(cwd_value)) if cwd_value else None

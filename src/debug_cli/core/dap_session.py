@@ -68,6 +68,14 @@ class DapSession:
     def client(self) -> DapClient | None:
         return self._client
 
+    @property
+    def source_context_lines(self) -> int:
+        return self._source_context_lines
+
+    def set_source_context_lines(self, value: int) -> None:
+        """Override the source-window size used by future stopped contexts."""
+        self._source_context_lines = max(0, int(value))
+
     # ---- lifecycle -----------------------------------------------------------
 
     def start(
@@ -236,7 +244,21 @@ class DapSession:
     # ---- inspection ----------------------------------------------------------
 
     def set_breakpoints(self, file: Path, bps: list[Breakpoint]) -> list[dict[str, Any]]:
-        """Replace breakpoints for ``file``. Records warnings for unresolved/adjusted."""
+        """Replace breakpoints for ``file``. Records warnings for unresolved/adjusted.
+
+        Returns the raw DAP breakpoint records. Newly-emitted warnings are
+        also pushed onto :attr:`_warnings` so they surface in the next
+        stopped context — and are made available via
+        :meth:`set_breakpoints_with_warnings` for callers (e.g. ``set-bp``,
+        ``continue --break``) that want them in their immediate response.
+        """
+        response_bps, _new = self.set_breakpoints_with_warnings(file, bps)
+        return response_bps
+
+    def set_breakpoints_with_warnings(
+        self, file: Path, bps: list[Breakpoint]
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Like :meth:`set_breakpoints` but also returns warnings from THIS call."""
         client = self._require_client()
         resolved_path = file.resolve()
         dap_bps: list[dict[str, Any]] = []
@@ -247,17 +269,20 @@ class DapSession:
             dap_bps.append(entry)
         body = client.set_breakpoints(resolved_path, dap_bps)
         response_bps: list[dict[str, Any]] = body.get("breakpoints", [])
+        new_warnings: list[str] = []
         for requested, actual in zip(bps, response_bps, strict=False):
             if not actual.get("verified", False):
-                self._warnings.append(f"unresolved breakpoint at {resolved_path}:{requested.line}")
+                new_warnings.append(f"unresolved breakpoint at {resolved_path}:{requested.line}")
             else:
                 actual_line = actual.get("line")
                 if actual_line is not None and int(actual_line) != requested.line:
-                    self._warnings.append(
+                    new_warnings.append(
                         f"breakpoint at {resolved_path}:{requested.line} "
                         f"adjusted to line {actual_line}"
                     )
-        return response_bps
+        # Keep the existing behavior: surface in the next stopped context too.
+        self._warnings.extend(new_warnings)
+        return response_bps, new_warnings
 
     def evaluate(self, expression: str, *, frame: int | None = None) -> str:
         self._ensure_stopped("evaluate")

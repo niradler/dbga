@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from debug_cli.core import control_proto
-from debug_cli.core.format import format_json, format_text
+from debug_cli.core.format import emit_error as _emit_error_payload
+from debug_cli.core.format import emit_payload
 from debug_cli.core.process import kill_tree
 from debug_cli.core.state import (
     ensure_state_dir,
@@ -43,6 +44,23 @@ def _add_common_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--session", default="default", help="Session name (default: 'default').")
     p.add_argument("--text", action="store_true", help="Human-readable output instead of JSON.")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON.")
+
+
+def _add_context_lines_flag(p: argparse.ArgumentParser) -> None:
+    """Attach ``--context-lines N`` for commands whose response includes a context."""
+    p.add_argument(
+        "--context-lines",
+        type=int,
+        default=None,
+        help="Source lines on each side of the stop location (overrides session default).",
+    )
+
+
+def _with_context_lines(args: argparse.Namespace, payload: dict[str, Any]) -> dict[str, Any]:
+    """Inject ``context_lines`` into a daemon-bound payload if the user set it."""
+    if getattr(args, "context_lines", None) is not None:
+        payload["context_lines"] = int(args.context_lines)
+    return payload
 
 
 def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -77,6 +95,12 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
         default=30.0,
         help="Seconds to wait for the initial stop event (default 30).",
     )
+    p_start.add_argument(
+        "--context-lines",
+        type=int,
+        default=5,
+        help="Source lines on each side of the current stop location (default 5).",
+    )
     _add_common_flags(p_start)
     p_start.add_argument("script", help="Path to the Python script to debug.")
     p_start.add_argument(
@@ -87,6 +111,7 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
     p_start.set_defaults(func=cmd_start)
 
     p_inspect = sub.add_parser("inspect", help="Re-read the current stopped state.")
+    _add_context_lines_flag(p_inspect)
     _add_common_flags(p_inspect)
     p_inspect.set_defaults(func=cmd_inspect)
 
@@ -101,6 +126,7 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
     p_eval = sub.add_parser("eval", help="Evaluate a Python expression in the current frame.")
     p_eval.add_argument("--expr", required=True, help="Expression to evaluate.")
     p_eval.add_argument("--frame", type=int, default=None, help="Frame id (default: current top).")
+    _add_context_lines_flag(p_eval)
     _add_common_flags(p_eval)
     p_eval.set_defaults(func=cmd_eval)
 
@@ -135,6 +161,7 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
         metavar="FILTER",
         help="Exception filter (e.g. 'raised', 'uncaught'). Repeatable.",
     )
+    _add_context_lines_flag(p_continue)
     _add_common_flags(p_continue)
     p_continue.set_defaults(func=cmd_continue)
 
@@ -145,6 +172,7 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
         default="over",
         help="Step mode (default: over).",
     )
+    _add_context_lines_flag(p_step)
     _add_common_flags(p_step)
     p_step.set_defaults(func=cmd_step)
 
@@ -182,6 +210,7 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
     p_listbp.set_defaults(func=cmd_list_bp)
 
     p_restart = sub.add_parser("restart", help="Re-launch the debuggee, preserving breakpoints.")
+    _add_context_lines_flag(p_restart)
     _add_common_flags(p_restart)
     p_restart.set_defaults(func=cmd_restart)
 
@@ -194,18 +223,14 @@ def _resolve_cwd(args: argparse.Namespace) -> Path:
 
 
 def _emit(args: argparse.Namespace, payload: dict[str, Any]) -> None:
-    if args.text:
-        print(format_text(payload))
-    else:
-        print(format_json(payload, pretty=args.pretty))
+    emit_payload(payload, text=args.text, pretty=args.pretty)
 
 
 def _emit_error(
     args: argparse.Namespace, message: str, *, error_type: str = "usage"
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"status": "error", "error_type": error_type, "message": message}
-    _emit(args, payload)
-    return payload
+    _emit_error_payload(error_type, message, text=args.text, pretty=args.pretty)
+    return {"status": "error", "error_type": error_type, "message": message}
 
 
 def _parse_break_at(value: str) -> tuple[Path, int] | None:
@@ -374,6 +399,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "listen_port": None,
         "idle_timeout_seconds": float(args.idle_timeout),
         "start_timeout_seconds": float(args.start_timeout),
+        "source_context_lines": int(args.context_lines),
         "pid": None,
         "control_port": None,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -443,14 +469,14 @@ def _terminate_daemon(pid: int) -> None:
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
-    return _call_daemon(args, "inspect", timeout=30.0)
+    return _call_daemon(args, "inspect", _with_context_lines(args, {}), timeout=30.0)
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
     return _call_daemon(
         args,
         "eval",
-        {"expression": args.expr, "frame": args.frame},
+        _with_context_lines(args, {"expression": args.expr, "frame": args.frame}),
         timeout=60.0,
     )
 
@@ -459,18 +485,21 @@ def cmd_continue(args: argparse.Namespace) -> int:
     return _call_daemon(
         args,
         "continue",
-        {
-            "add_bps": list(args.break_add or []),
-            "remove_bps": list(args.break_remove or []),
-            "to": args.to,
-            "exception_filters": list(args.exc_filters or []),
-        },
+        _with_context_lines(
+            args,
+            {
+                "add_bps": list(args.break_add or []),
+                "remove_bps": list(args.break_remove or []),
+                "to": args.to,
+                "exception_filters": list(args.exc_filters or []),
+            },
+        ),
         timeout=120.0,
     )
 
 
 def cmd_step(args: argparse.Namespace) -> int:
-    return _call_daemon(args, "step", {"mode": args.mode}, timeout=60.0)
+    return _call_daemon(args, "step", _with_context_lines(args, {"mode": args.mode}), timeout=60.0)
 
 
 def cmd_pause(args: argparse.Namespace) -> int:
@@ -523,7 +552,7 @@ def cmd_list_bp(args: argparse.Namespace) -> int:
 
 
 def cmd_restart(args: argparse.Namespace) -> int:
-    return _call_daemon(args, "restart", {}, timeout=120.0)
+    return _call_daemon(args, "restart", _with_context_lines(args, {}), timeout=120.0)
 
 
 def _parse_bp_with_condition(value: str) -> tuple[Path, int, str | None] | None:

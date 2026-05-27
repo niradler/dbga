@@ -59,17 +59,22 @@ def _frames_from_response(body: dict[str, Any]) -> list[FrameInfo]:
 
 
 def _read_source_window(path: str, line: int, context_lines: int) -> list[SourcePreview]:
-    """Best-effort source preview around ``line``. Empty list on any failure."""
-    if not path:
+    """Best-effort source preview around ``line``. Empty list on any failure.
+
+    ``context_lines`` is the number of lines on EACH side of ``line`` to
+    include — matching the convention used by ``localize``/``tracebacks``.
+    For example, ``context_lines=5`` produces up to 11 entries (5 before,
+    the current line, 5 after).
+    """
+    if not path or context_lines < 0:
         return []
     try:
         text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
     lines = text.splitlines()
-    half = context_lines // 2
-    start = max(1, line - half)
-    end = min(len(lines), line + (context_lines - half - 1))
+    start = max(1, line - context_lines)
+    end = min(len(lines), line + context_lines)
     preview: list[SourcePreview] = []
     for ln in range(start, end + 1):
         preview.append(
