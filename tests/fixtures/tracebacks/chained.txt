@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "src/inner.py", line 5, in inner
+    raise ValueError("bad")
+ValueError: bad
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "src/outer.py", line 10, in outer
+    inner()
+  File "src/inner.py", line 5, in inner
+    raise ValueError("bad")
+RuntimeError: failed to process

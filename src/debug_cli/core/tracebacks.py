@@ -11,6 +11,11 @@ _ERROR_RE = re.compile(
     r"^(?P<type>[A-Z]\w*(?:Error|Exception|Warning|Exit|Interrupt))(?::\s*(?P<msg>.*))?$"
 )
 
+_CHAINED_DIVIDERS = (
+    "During handling of the above exception, another exception occurred:",
+    "The above exception was the direct cause of the following exception:",
+)
+
 # Path fragments that mark a frame as non-user (library) code.
 _LIB_MARKERS = ("site-packages", "/lib/python", "\\Lib\\")
 
@@ -61,7 +66,8 @@ def _next_code_line(lines: list[str], i: int, skip_patterns: tuple[re.Pattern[st
     return nxt.strip()
 
 
-def parse_traceback(text: str) -> ParsedTraceback:
+def _parse_segment(text: str) -> ParsedTraceback:
+    """Parse a single (non-chained) traceback segment."""
     parsed = ParsedTraceback(raw=text)
     lines = text.splitlines()
     i = 0
@@ -91,3 +97,33 @@ def parse_traceback(text: str) -> ParsedTraceback:
 
     parsed.deepest_user_frame = _find_deepest_user_frame(parsed.frames)
     return parsed
+
+
+def _split_chained(text: str) -> list[str]:
+    """Split traceback text on chained-exception divider lines."""
+    segments: list[str] = []
+    buf: list[str] = []
+    for line in text.splitlines():
+        if line.strip() in _CHAINED_DIVIDERS:
+            if buf:
+                segments.append("\n".join(buf))
+                buf = []
+        else:
+            buf.append(line)
+    if buf:
+        segments.append("\n".join(buf))
+    return segments
+
+
+def parse_traceback(text: str) -> ParsedTraceback:
+    segments = _split_chained(text)
+    if not segments:
+        return ParsedTraceback(raw=text)
+
+    # Python prints chained exceptions oldest-first; the LAST segment is the outermost.
+    parsed_segments = [_parse_segment(seg) for seg in segments]
+    outermost = parsed_segments[-1]
+    # Earlier segments link in as `chained`, reverse-chronological (most recent first).
+    outermost.chained = list(reversed(parsed_segments[:-1]))
+    outermost.raw = text
+    return outermost

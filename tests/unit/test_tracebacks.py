@@ -19,6 +19,15 @@ def test_parse_standard_traceback() -> None:
     assert parsed.frames[1].func == "transform"
 
 
+def test_parse_chained_traceback() -> None:
+    text = (FIXTURES / "chained.txt").read_text()
+    parsed = parse_traceback(text)
+    assert parsed.error_type == "RuntimeError"
+    assert parsed.message == "failed to process"
+    assert len(parsed.chained) == 1
+    assert parsed.chained[0].error_type == "ValueError"
+
+
 def test_deepest_user_frame_skips_site_packages() -> None:
     text = (
         "Traceback (most recent call last):\n"
