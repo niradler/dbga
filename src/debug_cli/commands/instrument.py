@@ -4,7 +4,8 @@ import argparse
 from dataclasses import asdict
 from pathlib import Path
 
-from debug_cli.core.format import format_json, format_text
+from debug_cli.core.format import emit_error as _emit_error_payload
+from debug_cli.core.format import emit_payload
 from debug_cli.core.instrumentation import (
     VALID_KINDS,
     add_instrumentation,
@@ -60,14 +61,11 @@ def _resolve_cwd(args: argparse.Namespace) -> Path:
 
 
 def _emit(args: argparse.Namespace, payload: dict[str, object]) -> None:
-    if args.text:
-        print(format_text(payload))
-    else:
-        print(format_json(payload, pretty=args.pretty))
+    emit_payload(payload, text=args.text, pretty=args.pretty)
 
 
 def _emit_error(args: argparse.Namespace, message: str, *, error_type: str = "usage") -> None:
-    _emit(args, {"status": "error", "error_type": error_type, "message": message})
+    _emit_error_payload(error_type, message, text=args.text, pretty=args.pretty)
 
 
 def _parse_target(target: str) -> tuple[Path, int] | None:

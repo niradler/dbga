@@ -4,7 +4,7 @@ import argparse
 from dataclasses import asdict
 from pathlib import Path
 
-from debug_cli.core.format import format_json, format_text
+from debug_cli.core.format import emit_error, emit_payload
 from debug_cli.core.process import run_with_timeout
 
 
@@ -23,14 +23,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     if cmd and cmd[0] == "--":
         cmd = cmd[1:]
     if not cmd:
-        error = {"status": "error", "error_type": "usage", "message": "no command provided"}
-        print(format_json(error))
-        return 1
+        return emit_error("usage", "no command provided", text=args.text, pretty=args.pretty)
     cwd = Path(args.cwd) if args.cwd else None
-    result = run_with_timeout(cmd, timeout=args.timeout, cwd=cwd)
-    payload = asdict(result)
-    if args.text:
-        print(format_text(payload))
-    else:
-        print(format_json(payload, pretty=args.pretty))
+    try:
+        result = run_with_timeout(cmd, timeout=args.timeout, cwd=cwd)
+    except OSError as exc:
+        # ``FileNotFoundError``/``PermissionError`` are OSError subclasses; we
+        # collapse them all into ``io_error`` so callers get a single shape.
+        return emit_error("io_error", str(exc), text=args.text, pretty=args.pretty)
+    emit_payload(asdict(result), text=args.text, pretty=args.pretty)
     return 0

@@ -7,7 +7,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from debug_cli.core.format import format_json, format_text
+from debug_cli.core.format import emit_error, emit_payload
 from debug_cli.core.watch import scan_file, scan_process
 
 
@@ -58,31 +58,33 @@ def cmd_watch(args: argparse.Namespace) -> int:
     context_lines: int = args.context_lines
 
     timed_out = False
-    if args.file is not None:
-        matches = list(scan_file(Path(args.file), patterns=patterns, context_lines=context_lines))
-    else:
-        cmd_parts = _split_cmd(args.cmd)
-        start = time.monotonic()
-        matches = list(
-            scan_process(
-                cmd_parts,
-                patterns=patterns,
-                timeout=args.timeout,
-                until=args.until,
-                context_lines=context_lines,
+    try:
+        if args.file is not None:
+            matches = list(
+                scan_file(Path(args.file), patterns=patterns, context_lines=context_lines)
             )
-        )
-        # Only flag timed_out when --until didn't short-circuit; otherwise an
-        # elapsed time near `timeout` would be misreported as a timeout.
-        until_satisfied = args.until is not None and len(matches) >= args.until
-        timed_out = not until_satisfied and (time.monotonic() - start) >= args.timeout
+        else:
+            cmd_parts = _split_cmd(args.cmd)
+            start = time.monotonic()
+            matches = list(
+                scan_process(
+                    cmd_parts,
+                    patterns=patterns,
+                    timeout=args.timeout,
+                    until=args.until,
+                    context_lines=context_lines,
+                )
+            )
+            # Only flag timed_out when --until didn't short-circuit; otherwise
+            # an elapsed time near ``timeout`` would be misreported.
+            until_satisfied = args.until is not None and len(matches) >= args.until
+            timed_out = not until_satisfied and (time.monotonic() - start) >= args.timeout
+    except OSError as exc:
+        return emit_error("io_error", str(exc), text=args.text, pretty=args.pretty)
 
     payload = {
         "matches": [asdict(m) for m in matches],
         "timed_out": timed_out,
     }
-    if args.text:
-        print(format_text(payload))
-    else:
-        print(format_json(payload, pretty=args.pretty))
+    emit_payload(payload, text=args.text, pretty=args.pretty)
     return 0

@@ -43,13 +43,16 @@ def run_with_timeout(
         kill_tree(proc.pid)
         stdout, stderr = proc.communicate()
     duration_ms = int((time.monotonic() - start) * 1000)
+    killed_signal: str | None = None
+    if timed_out:
+        killed_signal = "TASKKILL" if sys.platform == "win32" else "SIGTERM"
     return RunResult(
         exit_code=proc.returncode,
         duration_ms=duration_ms,
         timed_out=timed_out,
         stdout=stdout or "",
         stderr=stderr or "",
-        killed_signal="SIGTERM" if timed_out else None,
+        killed_signal=killed_signal,
     )
 
 

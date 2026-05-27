@@ -24,3 +24,32 @@ def format_text(data: Any, *, indent: int = 0) -> str:
     if isinstance(data, list):
         return "\n".join(format_text(item, indent=indent) for item in data)
     return f"{pad}{data}"
+
+
+def emit_payload(payload: dict[str, Any], *, text: bool = False, pretty: bool = False) -> None:
+    """Print a payload to stdout in either JSON (default) or text format."""
+    if text:
+        print(format_text(payload))
+    else:
+        print(format_json(payload, pretty=pretty))
+
+
+def emit_error(
+    error_type: str,
+    message: str,
+    *,
+    details: dict[str, Any] | None = None,
+    text: bool = False,
+    pretty: bool = False,
+) -> int:
+    """Print structured error JSON to stdout and return exit code 1.
+
+    All command error paths should funnel through this helper so callers can
+    rely on a uniform ``{"status": "error", "error_type": ..., "message": ...}``
+    shape on stdout (never a Python traceback).
+    """
+    payload: dict[str, Any] = {"status": "error", "error_type": error_type, "message": message}
+    if details:
+        payload["details"] = details
+    emit_payload(payload, text=text, pretty=pretty)
+    return 1

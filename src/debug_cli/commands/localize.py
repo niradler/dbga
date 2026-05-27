@@ -5,7 +5,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from debug_cli.core.format import format_json, format_text
+from debug_cli.core.format import emit_error, emit_payload
 from debug_cli.core.tracebacks import attach_source, parse_traceback
 
 
@@ -35,28 +35,26 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
 def cmd_localize(args: argparse.Namespace) -> int:
     sources = sum(1 for x in (args.file, args.stdin, args.traceback_text) if x)
     if sources != 1:
-        error = {
-            "status": "error",
-            "error_type": "usage",
-            "message": "exactly one of --file, --stdin, or positional traceback_text is required",
-        }
-        print(format_json(error))
-        return 2
+        return emit_error(
+            "usage",
+            "exactly one of --file, --stdin, or positional traceback_text is required",
+            text=args.text,
+            pretty=args.pretty,
+        )
 
-    if args.file:
-        text = Path(args.file).read_text(encoding="utf-8")
-    elif args.stdin:
-        text = sys.stdin.read()
-    else:
-        text = args.traceback_text or ""
+    try:
+        if args.file:
+            text = Path(args.file).read_text(encoding="utf-8")
+        elif args.stdin:
+            text = sys.stdin.read()
+        else:
+            text = args.traceback_text or ""
+    except OSError as exc:
+        return emit_error("io_error", str(exc), text=args.text, pretty=args.pretty)
 
     parsed = parse_traceback(text)
     cwd = Path(args.cwd) if args.cwd else None
     attach_source(parsed, context_lines=args.context_lines, cwd=cwd)
 
-    payload = asdict(parsed)
-    if args.text:
-        print(format_text(payload))
-    else:
-        print(format_json(payload, pretty=args.pretty))
+    emit_payload(asdict(parsed), text=args.text, pretty=args.pretty)
     return 0
