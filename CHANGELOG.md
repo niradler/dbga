@@ -50,8 +50,9 @@ returned on every stop.
   `.debug-cli/breakpoints.json` into the initial set; `set-bp`/`clear-bp`
   write back unless `--no-write-bps-file`.
 - **Uniform JSON error contract** — every command emits a consistent
-  `{status, error, message, details}` shape on failure; `--text` toggles
-  human-readable output; `--pretty` indents JSON.
+  `{"status": "error", "error_type": ..., "message": ..., "details": ...}`
+  shape on failure; `--text` toggles human-readable output; `--pretty`
+  indents JSON.
 - **Auto-context on every stop** — location, ±5 source lines, locals
   (truncated to 200-char strings / 5-item collection previews), full stack
   (capped at 20 frames), recent output, warnings. No follow-up calls
@@ -76,4 +77,13 @@ returned on every stop.
 - Per-thread switching is not yet exposed (workaround: use
   `faulthandler.dump_traceback()` via `instrument`).
 - `diagnose --rerun` cannot recover a launchable target from `-m` / `-c`
-  invocations; falls back to traceback-only output.
+  invocations; falls back to traceback-only output (`{"status": "crash",
+  "note": "cannot rerun: ..."}`).
+- `watch --cmd` enforces `--timeout` only between output lines. A
+  perfectly silent child won't trip the wall-clock until it prints
+  something or exits. `kill_tree` on the cleanup path still ensures the
+  child is torn down on exit; the symptom is a delayed return, not a
+  leaked process.
+- `session start --listen` does not register a `meta.json` entry, so
+  `sessions ls` / `session release` cannot see or stop a listen-mode
+  session. Use the process owner (or the VS Code attach UI) to terminate.

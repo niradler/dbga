@@ -23,18 +23,19 @@ Two strikes, rethink: failing twice at the same location means your *theory* is 
 Capture the failure under a bounded run:
 
 ```powershell
-debug-cli run --timeout 30 -- python -m my_app --flag
+debug-cli run --timeout 30 -- python my_app.py --flag
 ```
 
 Output (JSON):
 
 ```json
 {
-  "status": "ok",
   "exit_code": 1,
-  "duration_seconds": 0.42,
+  "duration_ms": 420,
+  "timed_out": false,
   "stdout": "...",
-  "stderr": "Traceback (most recent call last):\n  File \"...\", line 17, in main\n    ...\nValueError: bad input"
+  "stderr": "Traceback (most recent call last):\n  File \"...\", line 17, in main\n    ...\nValueError: bad input",
+  "killed_signal": null
 }
 ```
 
@@ -47,7 +48,7 @@ If the program *hangs*, see `advanced.md` (hang/deadlock).
 If `run` produced a traceback, send it straight to `diagnose` (rerun + pause):
 
 ```powershell
-debug-cli diagnose --timeout 20 -- python -m my_app --flag
+debug-cli diagnose --timeout 20 -- python my_app.py --flag
 ```
 
 Or parse only, no rerun:
@@ -93,6 +94,7 @@ Auto-context gives you all of this in the JSON response. Example response shape:
 {
   "status": "stopped",
   "reason": "breakpoint",
+  "session_id": "default",
   "location": {"file": "worker.py", "line": 55, "function": "process"},
   "source": [
     {"line": 53, "text": "    for item in items:", "current": false},
@@ -100,13 +102,14 @@ Auto-context gives you all of this in the JSON response. Example response shape:
     {"line": 55, "text": "        result = transform(item)", "current": true},
     {"line": 56, "text": "        results.append(result)", "current": false}
   ],
-  "locals": [{"name": "items", "type": "list", "value": "[]", "length": 0}],
+  "locals": [{"name": "items", "type": "list", "value": "[]", "variables_reference": 0, "length": 0}],
   "stack": [
     {"frame_id": 1, "function": "process", "file": "worker.py", "line": 55},
     {"frame_id": 2, "function": "main",    "file": "app.py",    "line": 12}
   ],
   "output": "",
-  "warnings": []
+  "warnings": [],
+  "exit_code": null
 }
 ```
 
@@ -141,8 +144,9 @@ debug-cli session continue       # to the same breakpoint
 
 ```powershell
 # 1. Observe — reproduce
-debug-cli run --timeout 5 -- python -c "from app import compute; print(compute([]))"
+debug-cli run --timeout 5 -- python app_smoke.py
 # → stdout: "None"
+# (app_smoke.py contains: from app import compute; print(compute([])))
 
 # 2. Localize — no traceback, so go straight to a session at the suspect line
 debug-cli session start --break-at app.py:41 -- app.py

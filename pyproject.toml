@@ -4,9 +4,32 @@ version = "0.1.0"
 description = "Evidence-first Python debugger CLI for AI agents."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Nir Adler" }]
+keywords = ["debugger", "debugpy", "dap", "cli", "ai-agents", "python"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
     "debugpy>=1.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/niradler/debug-cli"
+Repository = "https://github.com/niradler/debug-cli"
+Issues = "https://github.com/niradler/debug-cli/issues"
+Changelog = "https://github.com/niradler/debug-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
 debug-cli = "debug_cli.cli:main"

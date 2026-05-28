@@ -28,16 +28,20 @@ Response:
 
 ```json
 {
-  "status": "ok",
-  "exception_type": "ValueError",
-  "exception_message": "bad input: ''",
+  "error_type": "ValueError",
+  "message": "bad input: ''",
   "frames": [
-    {"file": "/site-packages/click/core.py", "line": 1042, "function": "invoke", "is_user": false},
-    {"file": "app.py", "line": 17, "function": "main", "is_user": true,
-     "source": [{"line": 15, "text": "..."}, {"line": 17, "text": "raise ValueError(...)", "current": true}]},
-    {"file": "app.py", "line": 9, "function": "_parse", "is_user": true, "source": [...]}
+    {"file": "/site-packages/click/core.py", "line": 1042, "func": "invoke",
+     "code": "return self.callback(**ctx.params)", "is_user_code": false, "code_context": []},
+    {"file": "app.py", "line": 17, "func": "main",
+     "code": "raise ValueError(repr(raw_input))", "is_user_code": true,
+     "code_context": ["def main():", "    raw_input = sys.argv[1]", "    raise ValueError(repr(raw_input))"]}
   ],
-  "deepest_user_frame": {"file": "app.py", "line": 17, "function": "main"}
+  "deepest_user_frame": {"file": "app.py", "line": 17, "func": "main",
+                          "code": "raise ValueError(repr(raw_input))", "is_user_code": true,
+                          "code_context": [...]},
+  "chained": [],
+  "raw": "Traceback (most recent call last):\n..."
 }
 ```
 
@@ -45,7 +49,7 @@ Response:
 
 ### `--context-lines N`
 
-Attach N source lines on each side of each user frame (default 5). Drop to 2-3 for terse output, up to 10 if you need broader context.
+Attach N source lines on each side of each frame's line (default 2). Drop to 0 for terse output, up to 10 if you need broader context.
 
 ### Worked example — parse a CI failure
 
@@ -58,45 +62,65 @@ debug-cli localize --file ci_fail.txt --context-lines 3
 You learn: `app.py:17` in `main()`, `ValueError: bad input: ''`. Now you can:
 
 ```powershell
-debug-cli session start --break-at app.py:17 -- python -m app
+debug-cli session start --break-at app.py:17 -- app.py
 debug-cli session eval --expr "raw_input"     # what was passed?
 ```
+
+Note: `session start`'s positional is a **path to a Python script**. `-m module` / `-c code` invocations aren't supported — point at the script file directly.
 
 ## `diagnose` — Crash → Paused, One Call
 
 ```powershell
-debug-cli diagnose --timeout 20 -- python -m my_app
+debug-cli diagnose --timeout 20 -- python my_app.py --flag
 ```
 
 What it does:
 
 1. Runs the command (with the supplied timeout, tree-killed if it hangs).
-2. If the exit code is non-zero and stderr contains a parseable traceback, parses it.
-3. By default (`--rerun`), spawns a session with a breakpoint at the deepest user frame and starts the program. You land paused there, with full auto-context.
+2. If a parseable traceback is found in the combined stdout/stderr, parses it.
+3. By default (`--rerun`), spawns a session with a breakpoint at the deepest user frame and re-launches the program. You land paused there, with full auto-context.
+
+`diagnose` strips a leading `python`/`python3`/`py` interpreter and uses the next non-flag arg as the script. It cannot rerun `python -m foo` or `python -c "..."` (no script path to hand to debugpy).
 
 Response (rerun=true, crash):
 
 ```json
 {
-  "status": "stopped",
-  "reason": "breakpoint",
-  "session_id": "default",
-  "diagnosis": {
-    "exception_type": "ValueError",
-    "deepest_user_frame": {"file": "app.py", "line": 17, "function": "main"}
+  "status": "diagnosed",
+  "traceback": {
+    "error_type": "ValueError",
+    "message": "bad input: ''",
+    "frames": [...],
+    "deepest_user_frame": {"file": "app.py", "line": 17, "func": "main", ...}
   },
-  "location": {"file": "app.py", "line": 17, "function": "main"},
-  "source": [...],
-  "locals": [{"name": "raw_input", "type": "str", "value": "''"}],
-  "stack": [...]
+  "session_context": {
+    "status": "stopped",
+    "reason": "breakpoint",
+    "session_id": "default",
+    "location": {"file": "app.py", "line": 17, "function": "main"},
+    "source": [...],
+    "locals": [{"name": "raw_input", "type": "str", "value": "''"}],
+    "stack": [...],
+    "output": "",
+    "warnings": []
+  }
 }
 ```
 
 You can now `session eval`, `session step`, `session continue` against the live session named `default` (or whatever you passed via `--session`).
 
-Response (no crash): just the run result, exit code 0.
+Response (no crash, command ran clean):
 
-Response (crash, but `--no-rerun`): the localize output, no session opened.
+```json
+{"status": "no_crash", "exit_code": 0, "duration_ms": 412, "timed_out": false, "stdout": "...", "stderr": ""}
+```
+
+Response (crash but `--no-rerun`):
+
+```json
+{"status": "crash", "exit_code": 1, "duration_ms": 137, "timed_out": false,
+ "stdout": "...", "stderr": "...", "traceback": {...}}
+```
 
 ### When to use `diagnose`
 
@@ -128,7 +152,7 @@ debug-cli session release
 
 ## Edge Cases
 
-- **SyntaxError** — no stack. `deepest_user_frame` is the file:line of the syntax error itself. `diagnose` will refuse to rerun (no useful breakpoint to set on a file that won't even parse) — you'll just get the localize payload.
-- **`-m` / `-c` invocation** — `diagnose` can't always recover a launchable script target. If that happens you'll see `"rerun_skipped": "no launchable target"`; fall back to `localize` + a manual `session start`.
+- **SyntaxError** — no stack. `deepest_user_frame` is the file:line of the syntax error itself. `diagnose` will still try to rerun, but the launch will fail because the file doesn't parse — surface the `localize` payload and fix the syntax first.
+- **`-m` / `-c` invocation** — `diagnose` can't recover a launchable script target. The response is `{"status": "crash", "traceback": {...}, "note": "cannot rerun: 'python -m'/'python -c' invocations are unsupported"}`. Fall back to `localize` + a manual `session start` pointed at the underlying script file.
 - **Tracebacks with mixed user + library frames** — the parser walks bottom-up and picks the deepest frame whose path doesn't contain `site-packages`, `/lib/python`, or `\Lib\`. If your project lives under a path that looks like a library, you may need to point breakpoints manually.
 - **Chained exceptions** — the deepest user frame across *both* chains is selected. The `frames` array contains both chains with a `chain_marker` separator entry.

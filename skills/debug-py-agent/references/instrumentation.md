@@ -1,6 +1,6 @@
 # Instrumentation — Reversible Source Probes
 
-`debug-cli instrument` inserts a probe (a `print`, a `breakpoint()`, a trace logger, or arbitrary code) directly into the source file at a given `file:line`. The original file is snapshotted on first touch, so a single `instrument revert --all` rolls every probe back atomically. Indentation is preserved.
+`debug-cli instrument` inserts a probe (a `print`, a `breakpoint()`, a trace logger, or arbitrary code) directly into the source file at a given `file:line`. The original file is snapshotted on first touch, so a single `instrument revert --all` rolls every probe back atomically. The probe is inserted **before** the target line at the indentation of that target line.
 
 This is the right tool when a session won't help:
 
@@ -26,11 +26,10 @@ debug-cli instrument add app.py:42 --kind custom     --code "if x is None: raise
 
 debug-cli instrument list
 debug-cli instrument revert --all                    # remove every probe, restore originals
-debug-cli instrument revert --id <token>             # remove a single probe
-debug-cli instrument revert --file app.py            # remove all probes from one file
+debug-cli instrument revert <inst_id>                # remove a single probe by its id (positional)
 ```
 
-A probe is inserted **before** the target line, at the same indentation level (the parser reads the next non-blank line and matches its leading whitespace).
+A probe is inserted **before** the target line, at the indentation of that target line. To remove all probes from a single file, run `instrument revert <id>` for each entry that `instrument list` reports for that file, or just `instrument revert --all` if no other files are instrumented.
 
 ### `--kind` choices
 
@@ -45,7 +44,7 @@ The kind is metadata for `instrument list` and your own filtering; it doesn't ch
 
 ## State
 
-All instrumentation is tracked in `.debug-cli/instrumentation.json` with original-file snapshots stored alongside. The token-id (`secrets.token_hex(4)`) lets `revert --id` target one probe. Snapshots are file-level — `revert` restores the entire file to its pre-instrumentation state, so don't hand-edit a file *while* it has probes in it (or your edits will be lost on revert).
+All instrumentation is tracked in `.debug-cli/instrumentation.json` with original-file snapshots stored alongside. The id (`secrets.token_hex(4)`) lets `revert <id>` target one probe. Snapshots are file-level — `revert` restores the entire file to its pre-instrumentation state, so don't hand-edit a file *while* it has probes in it (or your edits will be lost on revert).
 
 ## Worked Example — Catch a Rare Wrong-Output Bug
 
@@ -57,13 +56,13 @@ debug-cli instrument add batch.py:218 --kind log \
   --code "if total < 0: print(f'BAD total={total} row={row!r}', flush=True)"
 
 # 2. Run the job as normal
-debug-cli run --timeout 7200 -- python -m batch --date 2026-05-28
+debug-cli run --timeout 7200 -- python batch.py --date 2026-05-28
 
 # 3. Grep the output for the BAD lines (or use watch)
 debug-cli watch --file batch_run.log --pattern "^BAD total=" --context-lines 2
 
 # 4. With a concrete row in hand, set up a targeted session
-debug-cli session start --break-at "batch.py:200:row['id'] == 'abc-123'" -- python -m batch --date 2026-05-28
+debug-cli session start --break-at "batch.py:200:row['id'] == 'abc-123'" -- batch.py --date 2026-05-28
 
 # 5. When done, undo every probe in one shot
 debug-cli instrument revert --all
@@ -80,7 +79,7 @@ A `aiohttp` handler crashes once per ~1000 requests with no useful traceback (th
 debug-cli instrument add handlers/users.py:88 --kind custom --code "import traceback; traceback.print_exc(); raise"
 
 # Run the server under your normal load test
-debug-cli run --timeout 600 -- python -m server
+debug-cli run --timeout 600 -- python server.py
 
 # Capture the traceback from stderr, localize, then revert
 debug-cli localize --file stderr.txt
@@ -104,7 +103,6 @@ Response:
 
 ```json
 {
-  "status": "ok",
   "instrumentations": [
     {"id": "a3f1b2c0", "file": "app.py", "line": 42, "kind": "log",        "code": "print('x=', x)"},
     {"id": "9d8e7c6b", "file": "app.py", "line": 88, "kind": "breakpoint", "code": "breakpoint()"}
@@ -112,4 +110,4 @@ Response:
 }
 ```
 
-The `id` is what `revert --id` takes. Tokens are short and human-typable.
+The `id` is what `revert <id>` takes (positional). Tokens are short and human-typable.

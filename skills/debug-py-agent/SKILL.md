@@ -36,10 +36,12 @@ When in doubt, start with the **least invasive** tool that can falsify your curr
 ## Core Commands at a Glance
 
 ```powershell
-# Bounded execution + uniform JSON
+# Bounded execution + uniform JSON (run/watch/diagnose take arbitrary commands)
 debug-cli run --timeout 10 -- python script.py
 debug-cli watch --file logs/app.log --pattern "ERROR|Traceback"
 debug-cli watch --cmd "python app.py" --pattern "READY" --until 1 --timeout 30
+
+# session start takes a script path (not a shell command — no `python -m foo`)
 
 # Crash → triage in one call
 debug-cli diagnose --timeout 20 -- python script.py             # parses traceback, reruns paused at deepest user frame
@@ -94,7 +96,7 @@ While paused at the bug, use `session eval --expr "<fix-expression>"` against li
 
 ## Cleanup
 
-Sessions auto-terminate when the debuggee exits or after the idle timeout (default 1800s; override with `--idle-timeout` on `session start`). If a session is wedged: `debug-cli session release` (or `stop`), then `debug-cli sessions ls` to confirm no zombies remain.
+Session daemons exit when you call `session release` (alias `stop`), or after the idle-timeout watchdog fires (default 1800s; override with `--idle-timeout` on `session start`). A debuggee that finishes on its own does **not** tear the daemon down — always `release` when you're done. If a daemon's PID disappears (process killed externally), `debug-cli sessions ls` cleans up the zombie meta on the next call.
 
 ## Workflow
 

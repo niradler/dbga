@@ -6,8 +6,10 @@ This is the workhorse for any interactive Python debugging: pausing, inspecting,
 
 ## Lifecycle
 
+The positional after `--` is the **path to a Python script** (e.g. `script.py`), not a command line. The CLI launches it under debugpy directly — `python -m foo` and `python -c "..."` aren't supported here (use a script file instead).
+
 ```powershell
-# Start (stops at entry by default; --break-at to land deeper)
+# Start (runs through to first breakpoint; pass --stop-on-entry to halt at first line)
 debug-cli session start --break-at app.py:42 -- script.py arg1 arg2
 
 # Inspect / drive
@@ -36,7 +38,7 @@ debug-cli session start --session frontend -- src/web.py
 debug-cli session start --session backend  -- src/api.py
 ```
 
-Each call to a non-`start` subcommand must pass `--session <name>` to address the right daemon. Daemons auto-exit on debuggee termination or after `--idle-timeout` seconds of inactivity (default 1800s = 30 min).
+Each call to a non-`start` subcommand must pass `--session <name>` to address the right daemon. Daemons exit when the debuggee terminates *and* `session release` is called, or after `--idle-timeout` seconds with no incoming requests (default 1800s = 30 min). A finished debuggee on its own does not tear the daemon down; you should always `release` when you're done.
 
 ## What Every Stop Returns
 
@@ -45,7 +47,7 @@ Every command that *can* stop the program (`start`, `continue`, `step`, `pause`,
 ```json
 {
   "status": "stopped",
-  "reason": "breakpoint",       // entry | breakpoint | step | pause | exception
+  "reason": "breakpoint",
   "session_id": "default",
   "location": {"file": "app.py", "line": 42, "function": "process"},
   "source": [
@@ -55,22 +57,27 @@ Every command that *can* stop the program (`start`, `continue`, `step`, `pause`,
     {"line": 43, "text": "        total += item.value", "current": false}
   ],
   "locals": [
-    {"name": "items", "type": "list", "value": "[<Item ...>, <Item ...>]", "length": 12, "variables_reference": 7},
-    {"name": "total", "type": "int",  "value": "0"}
+    {"name": "items", "type": "list", "value": "[<Item ...>, <Item ...>]",
+     "variables_reference": 7, "length": 12},
+    {"name": "total", "type": "int",  "value": "0", "variables_reference": 0}
   ],
   "stack": [
     {"frame_id": 1, "function": "process", "file": "app.py", "line": 42},
     {"frame_id": 2, "function": "main",    "file": "app.py", "line": 10}
   ],
-  "output": "",                  // stdout/stderr accumulated since last drain
-  "warnings": []                 // e.g. "breakpoint at app.py:99 moved to line 100"
+  "output": "",
+  "warnings": [],
+  "exit_code": null
 }
 ```
 
-If the program exits before stopping:
+`reason` is one of `entry`, `breakpoint`, `step`, `pause`, `exception`. `warnings` carries adapter notices like "breakpoint at app.py:99 moved to line 100".
+
+If the program exits before stopping (or after `continue` runs it to completion):
 
 ```json
-{"status": "terminated", "exit_code": 1, "output": "..."}
+{"status": "terminated", "reason": "", "session_id": "default", "exit_code": 1,
+ "location": null, "source": [], "locals": [], "stack": [], "output": "...", "warnings": []}
 ```
 
 `--context-lines N` (on every command that returns a stop) controls how many source lines flank the current line. Default 5. Lower for terse output, higher when context matters.
@@ -116,7 +123,7 @@ debug-cli session restart
 
 Re-launches the debuggee with the same script, args, and breakpoints. Counter is reset, state is gone — but you didn't have to retype anything. Perfect after an edit-and-verify cycle.
 
-If the previous run crashed mid-launch (rare), `restart` may fail; the response will say `"status": "restart_failed"` with the error, and the session will be torn down cleanly. Start over with `session start`.
+If the relaunch fails, the structured error contract kicks in: you'll get `{"status": "error", "error_type": ..., "message": ..., "details": ...}` with the daemon's explanation. Inspect the message and start over with `session start`.
 
 ## Worked Example — Finding a Wrong Value
 
@@ -124,7 +131,7 @@ Suspect: `worker.process()` returns 0 sometimes. We want to know what `items` lo
 
 ```powershell
 # Start, breakpoint where we suspect the wrong branch
-debug-cli session start --break-at "worker.py:55:total == 0" -- python -m runner
+debug-cli session start --break-at "worker.py:55:total == 0" -- runner.py
 
 # Stopped — read the stop context
 # locals: items=[], total=0
@@ -162,7 +169,7 @@ Six commands. Most of the value came from `eval --frame N`, not from stepping.
 You suspect iteration 500 of a 1000-iteration loop misbehaves:
 
 ```powershell
-debug-cli session start --break-at "process.py:42:i == 500" -- python -m proc
+debug-cli session start --break-at "process.py:42:i == 500" -- proc.py
 # → stopped exactly at i=500. No 499 continues.
 debug-cli session eval --expr "state.snapshot()"
 debug-cli session step --mode over
@@ -186,4 +193,4 @@ Returns active session names, their PIDs, control ports, idle timeouts, and zomb
 - **Breakpoint on a blank line / comment** → debugpy will slide it to the next executable line and emit a warning. Check `warnings[]` in the response.
 - **Conditional breakpoint with bad syntax** → fails silently (the bp is set but never matches because the condition raises every iteration). Test the condition with `eval` first.
 - **Forgetting to `release`** → daemon auto-exits after idle timeout, but until then it holds a localhost TCP port. Cheap, but not free. Always release when done.
-- **Two `session start` calls with the same name** → the second one returns `"error": "session already running"`. Use `--session OTHER` or release the first.
+- **Two `session start` calls with the same name** → the second one returns `{"status":"error", "error_type":"session_exists", "message":"session 'default' already running (pid=...)"}`. Use `--session OTHER` or release the first.

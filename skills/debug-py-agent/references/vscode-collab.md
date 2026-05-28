@@ -59,13 +59,13 @@ Response:
 {
   "status": "listening",
   "session_id": "default",
-  "attach_url": "tcp://127.0.0.1:5678",
+  "attach_url": "debugpy://127.0.0.1:5678",
   "pid": 12345,
   "note": "daemon-controlled session features are disabled; attach from VS Code"
 }
 ```
 
-The daemon spawned the debuggee with `debugpy.listen(("127.0.0.1", 5678), wait_for_client=True)` — execution is paused at the first line until VS Code attaches.
+The CLI launched the debuggee under `debugpy --listen 127.0.0.1:5678 --wait-for-client` — execution is paused before the first user line until VS Code attaches. `attach_url` uses the `debugpy://` scheme as an identifier; in VS Code you pass `host`/`port` directly (see launch config below).
 
 In VS Code, add to `.vscode/launch.json`:
 
@@ -82,10 +82,9 @@ Hit F5 → VS Code attaches, the program resumes (or hits your breakpoints).
 
 ### Important constraints in listen mode
 
-- **Daemon-controlled features are disabled.** While listening, the daemon does *not* hold a DAP client — VS Code does. `session eval`, `session step`, `session continue` will all error out with `"listen mode — control is owned by the remote client"`. Use VS Code's debug UI instead.
-- **`session release` still works.** It terminates the debuggee and cleans up.
+- **No daemon, no control socket.** Listen-mode skips the per-session daemon entirely — the CLI directly spawns the debuggee under `debugpy --listen` and returns. `session eval`, `session step`, `session continue`, `sessions ls`, `session release` cannot see or drive a listen-mode debuggee. Control belongs to VS Code; lifecycle is yours (`taskkill /PID 12345` on Windows, `kill 12345` on POSIX) until this gap is closed in a future release.
 - **127.0.0.1 only.** The listen socket is bound to localhost. No remote attach over the network — that's a deliberate security boundary.
-- **One client at a time.** debugpy accepts a single attach. If VS Code disconnects, the session terminates.
+- **One client at a time.** debugpy accepts a single attach. If VS Code disconnects, the debuggee exits.
 
 ### When to use listen mode
 
@@ -103,14 +102,14 @@ Hit F5 → VS Code attaches, the program resumes (or hits your breakpoints).
 
 ```powershell
 # 1. CLI: hunt down the suspect region with conditional bps
-debug-cli session start --break-at "loader.py:30:not records" -- python -m runner
+debug-cli session start --break-at "loader.py:30:not records" --use-bps-file -- runner.py
 debug-cli session eval --expr "source_path"
 debug-cli session set-bp loader.py:18
 debug-cli session list-bp
-debug-cli session release            # bps persist to .debug-cli/breakpoints.json
+debug-cli session release            # set-bp writes persist to .debug-cli/breakpoints.json
 
 # 2. Open VS Code, sync bps from the file, run again under --listen
-debug-cli session start --listen 5678 --use-bps-file -- python -m runner
+debug-cli session start --listen 5678 --use-bps-file -- runner.py
 
 # 3. Attach VS Code → step through visually with watch windows
 ```
@@ -122,4 +121,4 @@ You used the CLI's strength (scriptable, fast hypothesis testing) to narrow the 
 - **VS Code attaches but immediately disconnects.** Usually a version mismatch between debugpy in your venv and what VS Code's Python extension expects. Confirm: `python -c "import debugpy; print(debugpy.__version__)"` matches the extension's requirements.
 - **`address already in use`.** Another process is on port 5678. Pick a different port (`--listen 5679`) or find the offender with `netstat -ano | findstr :5678` on Windows.
 - **Breakpoints set in CLI not appearing in VS Code.** VS Code doesn't read `.debug-cli/breakpoints.json` natively — you need a sync step. See the handoff example above.
-- **Session declared `listening` but VS Code can't attach.** Check `debug-cli sessions ls` — the daemon may have exited (debuggee crashed before attach, or idle timeout fired during a long handoff). Restart with `--start-timeout` raised if you need more grace time.
+- **Session declared `listening` but VS Code can't attach.** Listen-mode sessions don't show up in `sessions ls` (no daemon). Check the PID returned in the `start` response (e.g. `Get-Process -Id 12345`) — if it's gone, the debuggee exited before attach. Re-run `session start --listen` and connect promptly.

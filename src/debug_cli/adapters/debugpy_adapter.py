@@ -30,11 +30,25 @@ def find_free_port() -> int:
 
 
 def spawn_adapter(port: int, *, host: str = "127.0.0.1") -> subprocess.Popen[bytes]:
-    """Spawn ``debugpy.adapter`` in debugServer mode on ``host:port``."""
-    return subprocess.Popen(
+    """Spawn ``debugpy.adapter`` in debugServer mode on ``host:port``.
+
+    The adapter spawns the debuggee as its own child. On POSIX we put the
+    adapter in its own session so ``killpg`` takes down the debuggee with
+    it. On Windows we rely on the parent/child relationship and
+    ``taskkill /F /T`` to walk descendants — we deliberately do *not* set
+    ``CREATE_NEW_PROCESS_GROUP``; that flag changes signal-handler defaults
+    in the child and triggers a thread-init race inside the debugpy
+    adapter under heavy concurrent launches.
+    """
+    kwargs: dict[str, object] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+    }
+    if sys.platform != "win32":
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(  # type: ignore[call-overload,no-any-return]
         [sys.executable, "-m", "debugpy.adapter", "--host", host, "--port", str(port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        **kwargs,
     )
 
 
@@ -58,6 +72,14 @@ def wait_until_listening(
     deadline = time.monotonic() + timeout
     last_err: OSError | None = None
     while time.monotonic() < deadline:
+        # Connect first; success means the adapter is reachable regardless of
+        # whether an internal thread has since crashed.
+        try:
+            return socket.create_connection((host, port), timeout=0.5)
+        except OSError as e:
+            last_err = e
+        # No reachable port. If the adapter process has also exited, surface
+        # that as the root cause — the connection will never succeed.
         if proc is not None and proc.poll() is not None:
             stderr = b""
             if proc.stderr is not None:
@@ -67,11 +89,7 @@ def wait_until_listening(
                 f"debugpy adapter exited with code {proc.returncode} "
                 f"before listening on {host}:{port}: {stderr.decode(errors='replace')[:500]}"
             )
-        try:
-            return socket.create_connection((host, port), timeout=0.5)
-        except OSError as e:
-            last_err = e
-            time.sleep(0.05)
+        time.sleep(0.05)
     raise TimeoutError(
         f"debugpy adapter not reachable on {host}:{port} within {timeout}s (last error: {last_err})"
     )

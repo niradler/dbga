@@ -22,8 +22,8 @@ Read the response:
 ### Worked example — infinite loop
 
 ```powershell
-debug-cli session start -- python -m proc
-# (CLI hangs on initial stop because the program runs without breakpoints — wait, then:)
+debug-cli session start -- proc.py
+# (returns immediately; the debuggee is running. Then:)
 debug-cli session pause
 # → location: proc.py:55, locals: i=99999, target=100
 # → loop is `while i < target: ...` but `i` is never incremented
@@ -71,7 +71,7 @@ Avoid trying to use a debugger session to *catch* a race — pausing changes tim
 A loop goes wrong at an unknown iteration in 10,000. Don't single-step. Binary-search:
 
 ```powershell
-debug-cli session start --break-at "app.py:45:i == 5000" -- python -m proc
+debug-cli session start --break-at "app.py:45:i == 5000" -- proc.py
 # → stopped at i=5000
 debug-cli session eval --expr "is_valid(state)"
 # → True  → bug is after iteration 5000

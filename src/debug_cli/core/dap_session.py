@@ -28,6 +28,7 @@ from debug_cli.core.dap_types import (
     StoppedContext,
     VariableInfo,
 )
+from debug_cli.core.process import kill_tree
 
 __all__ = [
     "Breakpoint",
@@ -136,7 +137,13 @@ class DapSession:
             raise
 
     def release(self) -> None:
-        """Best-effort cleanup. Idempotent — safe to call from ``finally``."""
+        """Best-effort cleanup. Idempotent — safe to call from ``finally``.
+
+        Tree-kills the adapter process group so the debuggee (a child of the
+        adapter) is torn down with it. The DAP ``disconnect`` request goes
+        first to give the adapter a graceful-shutdown chance; the tree-kill
+        is the unconditional fallback.
+        """
         if self._state == "released":
             return
         client = self._client
@@ -147,13 +154,14 @@ class DapSession:
         proc = self._adapter_proc
         self._adapter_proc = None
         if proc is not None and proc.poll() is None:
-            with contextlib.suppress(Exception):
-                proc.terminate()
+            # First, give the adapter a moment to exit on its own after the
+            # graceful disconnect. If it doesn't, tree-kill the whole process
+            # group so the debuggee child goes with it.
             try:
-                proc.wait(timeout=5.0)
+                proc.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
                 with contextlib.suppress(Exception):
-                    proc.kill()
+                    kill_tree(proc.pid)
                 with contextlib.suppress(Exception):
                     proc.wait(timeout=5.0)
         self._state = "released"
