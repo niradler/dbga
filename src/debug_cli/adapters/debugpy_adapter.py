@@ -15,6 +15,7 @@ The standalone adapter pattern is reliable and well documented.
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import subprocess
 import sys
@@ -38,17 +39,34 @@ def spawn_adapter(port: int, *, host: str = "127.0.0.1") -> subprocess.Popen[byt
 
 
 def wait_until_listening(
-    port: int, *, host: str = "127.0.0.1", timeout: float = 5.0
+    port: int,
+    *,
+    host: str = "127.0.0.1",
+    timeout: float = 5.0,
+    proc: subprocess.Popen[bytes] | None = None,
 ) -> socket.socket:
     """Block until ``host:port`` accepts a TCP connection, return that socket.
 
     ``debugpy.adapter`` only accepts a single client connection — if we
     probe-and-close, the adapter exits. So this returns the live socket
     on success, which the caller should hand to the DAP client.
+
+    If ``proc`` is supplied, we abort early if the adapter subprocess exits
+    before the port is accepting connections — surfaces "adapter crashed
+    on startup" as itself rather than as a generic timeout.
     """
     deadline = time.monotonic() + timeout
     last_err: OSError | None = None
     while time.monotonic() < deadline:
+        if proc is not None and proc.poll() is not None:
+            stderr = b""
+            if proc.stderr is not None:
+                with contextlib.suppress(OSError):
+                    stderr = proc.stderr.read() or b""
+            raise RuntimeError(
+                f"debugpy adapter exited with code {proc.returncode} "
+                f"before listening on {host}:{port}: {stderr.decode(errors='replace')[:500]}"
+            )
         try:
             return socket.create_connection((host, port), timeout=0.5)
         except OSError as e:

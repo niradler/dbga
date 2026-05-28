@@ -97,7 +97,7 @@ class DapSession:
         port = debugpy_adapter.find_free_port()
         self._adapter_proc = debugpy_adapter.spawn_adapter(port)
         try:
-            sock = debugpy_adapter.wait_until_listening(port, timeout=10.0)
+            sock = debugpy_adapter.wait_until_listening(port, timeout=30.0, proc=self._adapter_proc)
             client = DapClient()
             client.attach_socket(sock)
             self._client = client

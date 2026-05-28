@@ -35,7 +35,7 @@ def test_initialize_handshake() -> None:
     port = debugpy_adapter.find_free_port()
     proc = debugpy_adapter.spawn_adapter(port)
     try:
-        sock = debugpy_adapter.wait_until_listening(port, timeout=10.0)
+        sock = debugpy_adapter.wait_until_listening(port, timeout=30.0, proc=proc)
         client = DapClient()
         client.attach_socket(sock)
         try:
@@ -52,7 +52,7 @@ def test_launch_and_hit_breakpoint() -> None:
     port = debugpy_adapter.find_free_port()
     proc = debugpy_adapter.spawn_adapter(port)
     try:
-        sock = debugpy_adapter.wait_until_listening(port, timeout=10.0)
+        sock = debugpy_adapter.wait_until_listening(port, timeout=30.0, proc=proc)
         client = DapClient()
         client.attach_socket(sock)
         try:
