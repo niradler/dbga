@@ -13,7 +13,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 def _cli(*args: str, cwd: Path, timeout: float = 90.0) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "debug_cli", *args],
+        [sys.executable, "-m", "debug_agent", *args],
         capture_output=True,
         text=True,
         timeout=timeout,

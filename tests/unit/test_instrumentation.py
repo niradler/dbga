@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from debug_cli.core.instrumentation import (
+from debug_agent.core.instrumentation import (
     Instrumentation,
     add_instrumentation,
     list_instrumentations,

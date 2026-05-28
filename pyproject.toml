@@ -1,5 +1,5 @@
 [project]
-name = "debug-cli"
+name = "dbga"
 version = "0.1.0"
 description = "Evidence-first Python debugger CLI for AI agents."
 readme = "README.md"
@@ -26,13 +26,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/niradler/debug-cli"
-Repository = "https://github.com/niradler/debug-cli"
-Issues = "https://github.com/niradler/debug-cli/issues"
-Changelog = "https://github.com/niradler/debug-cli/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/niradler/dbga"
+Repository = "https://github.com/niradler/dbga"
+Issues = "https://github.com/niradler/dbga/issues"
+Changelog = "https://github.com/niradler/dbga/blob/main/CHANGELOG.md"
 
 [project.scripts]
-debug-cli = "debug_cli.cli:main"
+dbga = "debug_agent.cli:main"
 
 [dependency-groups]
 dev = [
@@ -47,7 +47,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/debug_cli"]
+packages = ["src/debug_agent"]
 
 [tool.ruff]
 line-length = 100
@@ -59,7 +59,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 strict = true
 python_version = "3.10"
-files = ["src/debug_cli"]
+files = ["src/debug_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

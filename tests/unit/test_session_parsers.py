@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from debug_cli.commands.session import _parse_bp_with_condition, _parse_break_at
+from debug_agent.commands.session import _parse_bp_with_condition, _parse_break_at
 
 
 def test_break_at_file_line() -> None:

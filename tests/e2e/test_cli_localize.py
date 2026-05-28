@@ -13,7 +13,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures" / "tracebacks"
 @pytest.mark.e2e
 def test_cli_localize_from_file() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "debug_cli", "localize", "--file", str(FIXTURES / "standard.txt")],
+        [sys.executable, "-m", "debug_agent", "localize", "--file", str(FIXTURES / "standard.txt")],
         capture_output=True,
         text=True,
         timeout=10,
@@ -28,7 +28,7 @@ def test_cli_localize_from_file() -> None:
 def test_cli_localize_from_stdin() -> None:
     tb = (FIXTURES / "standard.txt").read_text()
     result = subprocess.run(
-        [sys.executable, "-m", "debug_cli", "localize", "--stdin"],
+        [sys.executable, "-m", "debug_agent", "localize", "--stdin"],
         input=tb,
         capture_output=True,
         text=True,

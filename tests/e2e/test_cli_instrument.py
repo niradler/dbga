@@ -8,7 +8,7 @@ from pathlib import Path
 
 def _run_cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "debug_cli", "instrument", *args],
+        [sys.executable, "-m", "debug_agent", "instrument", *args],
         capture_output=True,
         text=True,
         timeout=10,

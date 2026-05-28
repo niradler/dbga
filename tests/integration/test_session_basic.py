@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from debug_cli.core.dap_session import Breakpoint, DapSession
+from debug_agent.core.dap_session import Breakpoint, DapSession
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "simple_ok.py"
 

@@ -1,4 +1,4 @@
-# debug-cli
+# debug-agent
 
 **Evidence-first Python debugger CLI for AI agents.**
 
@@ -10,17 +10,17 @@ can drive a real debugger in the same way it edits files: one command, one
 structured result, no hidden state.
 
 ```sh
-debug-cli session start --break-at app.py:42 -- script.py
-debug-cli session eval --expr "len(items)"
-debug-cli session continue --break "loader.py:30:not records"
-debug-cli session release
+dbga session start --break-at app.py:42 -- script.py
+dbga session eval --expr "len(items)"
+dbga session continue --break "loader.py:30:not records"
+dbga session release
 ```
 
 ## Why
 
 Print-statement debugging gives you one value per round-trip. A debugger
 gives you the whole picture — but `pdb` and raw `debugpy` are stateful TUIs
-designed for humans, not pipelines. `debug-cli` exposes the same observability
+designed for humans, not pipelines. `debug-agent` exposes the same observability
 through a flat, scriptable CLI:
 
 - **Auto-context on every stop.** No follow-up `where` / `inspect` / `list`
@@ -39,50 +39,60 @@ through a flat, scriptable CLI:
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-# From source (development)
-git clone https://github.com/<you>/debug-cli && cd debug-cli
-uv sync --all-extras
-uv run debug-cli --version
+# Zero-install — run from a one-shot uv environment
+uvx dbga --version
 
-# From PyPI (once published)
-uv pip install debug-cli
-debug-cli --version
+# Persistent install into a uv-managed tool environment
+uv tool install dbga
+dbga --version
+
+# Or into a project venv
+uv pip install dbga
+dbga --version
+
+# From source (development)
+git clone https://github.com/niradler/dbga && cd dbga
+uv sync --all-extras
+uv run dbga --version
 ```
+
+> [!NOTE]
+> Distribution: `dbga` (PyPI) · CLI binary: `dbga` · Python import: `debug_agent`.
 
 ## Quick Tour
 
 ```sh
 # Bounded execution + uniform JSON
-debug-cli run --timeout 10 -- python script.py
-debug-cli watch --cmd "python -m server" --pattern "READY" --until 1 --timeout 30
+dbga run --timeout 10 -- python script.py
+dbga watch --cmd "python -m server" --pattern "READY" --until 1 --timeout 30
 
 # Crash → triage in one call
-debug-cli diagnose --timeout 20 -- python -m my_app
+dbga diagnose --timeout 20 -- python -m my_app
 # → reruns paused at the deepest user frame, with full auto-context
 
 # Reversible source probes (snapshot once, revert atomically)
-debug-cli instrument add app.py:42 --kind log --code "print('items=', items, flush=True)"
-debug-cli instrument list
-debug-cli instrument revert --all
+dbga instrument add app.py:42 --kind log --code "print('items=', items, flush=True)"
+dbga instrument list
+dbga instrument revert --all
 
 # Stateful DAP sessions
-debug-cli session start --break-at "app.py:55:total == 0" -- script.py
-debug-cli session eval --expr "items" --frame 1
-debug-cli session continue --break loader.py:30 --remove-break app.py:55
-debug-cli session restart
-debug-cli session release
+dbga session start --break-at "app.py:55:total == 0" -- script.py
+dbga session eval --expr "items" --frame 1
+dbga session continue --break loader.py:30 --remove-break app.py:55
+dbga session restart
+dbga session release
 
 # VS Code collab — attach from your IDE
-debug-cli session start --listen 5678 --use-bps-file -- script.py
+dbga session start --listen 5678 --use-bps-file -- script.py
 ```
 
 Every command supports `--text` for human-readable output and `--pretty` for
-indented JSON. For full flag references: `debug-cli <cmd> --help`.
+indented JSON. For full flag references: `dbga <cmd> --help`.
 
 ## Architecture
 
 ```text
-                stateless CLI
+                stateless CLI (dbga)
                      │
                      │ length-prefixed JSON, 127.0.0.1:PORT
                      ▼
@@ -95,10 +105,10 @@ indented JSON. For full flag references: `debug-cli <cmd> --help`.
 
 The daemon owns the live DAP connection, breakpoint state, current frame, and
 output buffer. The CLI is a one-shot client. State is persisted in
-`./.debug-cli/` (configurable via `--cwd`):
+`./.debug-agent/` (configurable via `--cwd`):
 
 ```text
-.debug-cli/
+.debug-agent/
 ├── breakpoints.json          # shared with VS Code via --use-bps-file
 ├── instrumentation.json      # active probes + file snapshots
 ├── snapshots/                # original source preserved for atomic revert
@@ -109,10 +119,10 @@ output buffer. The CLI is a one-shot client. State is persisted in
         └── lock              # liveness marker
 ```
 
-## The `debug-py-agent` Skill
+## The `debug-agent` Skill
 
-`skills/debug-py-agent/` contains a Claude / agent skill that teaches
-evidence-first debugging on top of `debug-cli`. It includes:
+`skills/debug-agent/` contains a Claude / agent skill that teaches
+evidence-first debugging on top of `dbga`. It includes:
 
 - **`SKILL.md`** — when to trigger, decision tree, mindset
 - **`references/workflow.md`** — the evidence-first loop
@@ -123,14 +133,28 @@ evidence-first debugging on top of `debug-cli`. It includes:
 - **`references/vscode-collab.md`** — `--listen` + shared breakpoints
 - **`references/advanced.md`** — hang / deadlock / concurrency / wolf-fence
 
-To install into Claude Code or a compatible agent host:
+### Install the skill
+
+The recommended path is [`npx skills`](https://github.com/vercel-labs/skills),
+the open agent-skills installer. It reads `SKILL.md` straight from the GitHub
+repo and drops it into `~/.claude/skills/` (or your agent host's equivalent):
+
+```sh
+# Install just this skill
+npx skills add niradler/dbga --skill debug-agent
+
+# Or preview what's available first
+npx skills add niradler/dbga --list
+```
+
+Manual install also works:
 
 ```sh
 # Linux / macOS
-cp -r skills/debug-py-agent ~/.claude/skills/
+cp -r skills/debug-agent ~/.claude/skills/
 
 # Windows PowerShell
-Copy-Item -Recurse skills/debug-py-agent $env:USERPROFILE\.claude\skills\
+Copy-Item -Recurse skills/debug-agent $env:USERPROFILE\.claude\skills\
 ```
 
 ## Development
@@ -143,7 +167,7 @@ uv run pytest -m "not e2e" -v       # skip slowest CLI subprocess tests
 uv run ruff check .                 # lint
 uv run ruff format --check .        # format check
 uv run mypy src                     # strict type check
-uv run pytest --cov=debug_cli --cov-report=html
+uv run pytest --cov=debug_agent --cov-report=html
 ```
 
 Tiers:
@@ -151,7 +175,7 @@ Tiers:
 - **Unit tests** (`tests/unit/`) — pure functions only, no debugpy.
 - **Integration** (`tests/integration/`, marked `integration`) — spawn the
   real `debugpy` adapter, drive DAP, no subprocess CLI.
-- **E2E** (`tests/e2e/`, marked `e2e`) — invoke `python -m debug_cli ...` via
+- **E2E** (`tests/e2e/`, marked `e2e`) — invoke `python -m debug_agent ...` via
   subprocess. Slowest.
 
 ## Security Posture

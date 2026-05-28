@@ -13,7 +13,7 @@ def test_cli_watch_file(tmp_path: Path) -> None:
         [
             sys.executable,
             "-m",
-            "debug_cli",
+            "debug_agent",
             "watch",
             "--file",
             str(log),
@@ -36,7 +36,7 @@ def test_cli_watch_cmd() -> None:
         [
             sys.executable,
             "-m",
-            "debug_cli",
+            "debug_agent",
             "watch",
             "--cmd",
             f"{sys.executable} -u -c \"print('ERROR oops')\"",

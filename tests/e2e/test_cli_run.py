@@ -10,7 +10,7 @@ def test_cli_run_returns_json() -> None:
         [
             sys.executable,
             "-m",
-            "debug_cli",
+            "debug_agent",
             "run",
             "--timeout",
             "5",

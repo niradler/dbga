@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from debug_cli.core.process import RunResult, run_with_timeout
+from debug_agent.core.process import RunResult, run_with_timeout
 
 
 def test_run_captures_stdout() -> None:

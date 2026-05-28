@@ -16,14 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from debug_cli.core.state import is_pid_alive
+from debug_agent.core.state import is_pid_alive
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "simple_ok.py"
 
 
 def _cli(*args: str, cwd: Path, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "debug_cli", *args],
+        [sys.executable, "-m", "debug_agent", *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -48,7 +48,7 @@ def test_idle_timeout_kills_daemon(tmp_path: Path) -> None:
     assert start.returncode == 0, start.stderr
 
     meta = json.loads(
-        (tmp_path / ".debug-cli" / "sessions" / "default" / "meta.json").read_text("utf-8")
+        (tmp_path / ".debug-agent" / "sessions" / "default" / "meta.json").read_text("utf-8")
     )
     pid = int(meta["pid"])
     assert is_pid_alive(pid)
@@ -62,7 +62,7 @@ def test_idle_timeout_kills_daemon(tmp_path: Path) -> None:
     assert not is_pid_alive(pid), f"daemon pid {pid} still alive after idle timeout"
 
     # Whether the directory is gone or marked terminated is acceptable.
-    sdir = tmp_path / ".debug-cli" / "sessions" / "default"
+    sdir = tmp_path / ".debug-agent" / "sessions" / "default"
     if sdir.exists():
         # Reap it via ``sessions ls`` so subsequent runs are clean.
         ls = _cli("sessions", "ls", cwd=tmp_path)

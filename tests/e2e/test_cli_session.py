@@ -12,7 +12,7 @@ FIXTURE = Path(__file__).parent.parent / "fixtures" / "simple_ok.py"
 
 def _cli(*args: str, cwd: Path, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "debug_cli", *args],
+        [sys.executable, "-m", "debug_agent", *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -55,7 +55,7 @@ def test_session_start_inspect_release(tmp_path: Path) -> None:
     payload = json.loads(release.stdout)
     assert payload["status"] == "ok"
 
-    sessions_root = tmp_path / ".debug-cli" / "sessions"
+    sessions_root = tmp_path / ".debug-agent" / "sessions"
     assert not (sessions_root / "default").exists()
 
 
@@ -96,7 +96,7 @@ def test_session_start_then_immediate_release_no_orphans(tmp_path: Path) -> None
         assert start.returncode == 0, start.stderr
         release = _cli("session", "release", cwd=tmp_path)
         assert release.returncode == 0, release.stderr
-    sessions_root = tmp_path / ".debug-cli" / "sessions"
+    sessions_root = tmp_path / ".debug-agent" / "sessions"
     assert not (sessions_root / "default").exists()
 
 
@@ -105,7 +105,7 @@ def test_session_start_replaces_stale_meta(tmp_path: Path) -> None:
     """A meta.json with a dead PID should be cleaned up automatically on next start."""
     target = tmp_path / "simple_ok.py"
     target.write_text(FIXTURE.read_text())
-    sessions_root = tmp_path / ".debug-cli" / "sessions" / "default"
+    sessions_root = tmp_path / ".debug-agent" / "sessions" / "default"
     sessions_root.mkdir(parents=True, exist_ok=True)
     # Plant a meta.json pointing at a definitely-dead PID.
     (sessions_root / "meta.json").write_text(

@@ -12,7 +12,7 @@ FIXTURE = Path(__file__).parent.parent / "fixtures" / "simple_ok.py"
 
 def _cli(*args: str, cwd: Path, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "debug_cli", *args],
+        [sys.executable, "-m", "debug_agent", *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -79,7 +79,7 @@ def test_sessions_ls_lists_multiple_named(tmp_path: Path) -> None:
 
 @pytest.mark.e2e
 def test_sessions_ls_cleans_zombie(tmp_path: Path) -> None:
-    sessions_root = tmp_path / ".debug-cli" / "sessions" / "ghost"
+    sessions_root = tmp_path / ".debug-agent" / "sessions" / "ghost"
     sessions_root.mkdir(parents=True, exist_ok=True)
     (sessions_root / "meta.json").write_text(
         json.dumps({"session_id": "ghost", "pid": 999999, "control_port": 1, "status": "stopped"}),

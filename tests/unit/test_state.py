@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from debug_cli.core.state import (
+from debug_agent.core.state import (
     ensure_state_dir,
     merge_breakpoints,
     read_breakpoints,
@@ -17,7 +17,7 @@ from debug_cli.core.state import (
 
 def test_ensure_state_dir_creates_structure(tmp_path: Path) -> None:
     d = ensure_state_dir(tmp_path)
-    assert d == tmp_path / ".debug-cli"
+    assert d == tmp_path / ".debug-agent"
     assert (d / "sessions").is_dir()
     assert (d / "snapshots").is_dir()
     assert json.loads((d / "breakpoints.json").read_text()) == []
@@ -35,7 +35,7 @@ def test_write_read_roundtrip(tmp_path: Path) -> None:
 
 
 def test_state_dir_returns_path(tmp_path: Path) -> None:
-    assert state_dir(tmp_path) == tmp_path / ".debug-cli"
+    assert state_dir(tmp_path) == tmp_path / ".debug-agent"
 
 
 def test_breakpoints_roundtrip(tmp_path: Path) -> None:

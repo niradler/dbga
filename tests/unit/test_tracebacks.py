@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from debug_cli.core.tracebacks import ParsedTraceback, attach_source, parse_traceback
+from debug_agent.core.tracebacks import ParsedTraceback, attach_source, parse_traceback
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tracebacks"
 

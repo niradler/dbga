@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from debug_cli.adapters import debugpy_adapter
-from debug_cli.core.dap_client import DapClient
+from debug_agent.adapters import debugpy_adapter
+from debug_agent.core.dap_client import DapClient
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "simple_ok.py"
 

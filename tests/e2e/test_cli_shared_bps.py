@@ -13,7 +13,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 def _cli(*args: str, cwd: Path, timeout: float = 60.0) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "debug_cli", *args],
+        [sys.executable, "-m", "debug_agent", *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -32,7 +32,7 @@ def _release(tmp_path: Path) -> None:
 
 
 def _write_shared_bps(tmp_path: Path, entries: list[dict]) -> Path:
-    state = tmp_path / ".debug-cli"
+    state = tmp_path / ".debug-agent"
     state.mkdir(parents=True, exist_ok=True)
     bps = state / "breakpoints.json"
     bps.write_text(json.dumps(entries), encoding="utf-8")
@@ -40,7 +40,7 @@ def _write_shared_bps(tmp_path: Path, entries: list[dict]) -> Path:
 
 
 def _read_shared_bps(tmp_path: Path) -> list[dict]:
-    bps = tmp_path / ".debug-cli" / "breakpoints.json"
+    bps = tmp_path / ".debug-agent" / "breakpoints.json"
     if not bps.exists():
         return []
     return json.loads(bps.read_text(encoding="utf-8"))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from debug_cli.core.format import format_json, format_text
+from debug_agent.core.format import format_json, format_text
 
 
 def test_format_json_compact() -> None:

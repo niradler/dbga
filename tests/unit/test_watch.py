@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from debug_cli.core.watch import WatchMatch, scan_file, scan_process
+from debug_agent.core.watch import WatchMatch, scan_file, scan_process
 
 
 def test_scan_file_finds_pattern(tmp_path: Path) -> None:
