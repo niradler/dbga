@@ -4,6 +4,7 @@ import argparse
 import sys
 import traceback
 
+from debug_cli.commands import diagnose as diagnose_cmd
 from debug_cli.commands import instrument as instrument_cmd
 from debug_cli.commands import localize as localize_cmd
 from debug_cli.commands import run as run_cmd
@@ -26,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     instrument_cmd.add_subparser(subparsers)
     session_cmd.add_subparser(subparsers)
     sessions_cmd.add_subparser(subparsers)
+    diagnose_cmd.add_subparser(subparsers)
     return parser
 
 

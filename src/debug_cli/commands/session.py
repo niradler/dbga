@@ -28,6 +28,8 @@ from debug_cli.core.process import kill_tree
 from debug_cli.core.state import (
     ensure_state_dir,
     is_pid_alive,
+    merge_breakpoints,
+    read_breakpoints,
     session_dir,
 )
 
@@ -100,6 +102,26 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
         type=int,
         default=5,
         help="Source lines on each side of the current stop location (default 5).",
+    )
+    p_start.add_argument(
+        "--listen",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help=(
+            "Spawn the debuggee in debugpy listen mode for VS Code remote-attach. "
+            "Returns attach_url; daemon-controlled session features are disabled."
+        ),
+    )
+    p_start.add_argument(
+        "--use-bps-file",
+        action="store_true",
+        help="Merge breakpoints from .debug-cli/breakpoints.json into the initial set.",
+    )
+    p_start.add_argument(
+        "--no-write-bps-file",
+        action="store_true",
+        help="Don't write back to .debug-cli/breakpoints.json on set-bp/clear-bp.",
     )
     _add_common_flags(p_start)
     p_start.add_argument("script", help="Path to the Python script to debug.")
@@ -351,24 +373,7 @@ def _wait_for_control_port(meta_path: Path, *, timeout: float) -> int | None:
 
 def cmd_start(args: argparse.Namespace) -> int:
     cwd = _resolve_cwd(args)
-    ensure_state_dir(cwd)
-    sdir = session_dir(cwd, args.session)
-    meta_path = sdir / "meta.json"
-
-    existing = _read_meta(meta_path)
-    if existing is not None:
-        pid = existing.get("pid")
-        if isinstance(pid, int) and is_pid_alive(pid):
-            _emit_error(
-                args,
-                f"session {args.session!r} already running (pid={pid})",
-                error_type="session_exists",
-            )
-            return 2
-        # Stale meta — clean up so we can re-use the directory.
-        shutil.rmtree(sdir, ignore_errors=True)
-
-    # Resolve breakpoints against cwd.
+    # Resolve break-at specs to dicts up-front so the inline helper gets normalized input.
     breakpoints: list[dict[str, Any]] = []
     for spec in args.break_at:
         parsed = _parse_break_at(spec)
@@ -379,27 +384,120 @@ def cmd_start(args: argparse.Namespace) -> int:
         file = (cwd / file).resolve() if not file.is_absolute() else file.resolve()
         breakpoints.append({"file": str(file), "line": line, "condition": None})
 
-    script = Path(args.script)
-    script = (cwd / script).resolve() if not script.is_absolute() else script.resolve()
-    if not script.exists():
-        _emit_error(args, f"script not found: {script}", error_type="not_found")
-        return 2
+    result = start_session_inline(
+        cwd=cwd,
+        session_name=args.session,
+        script=args.script,
+        script_args=list(args.script_args or []),
+        breakpoints=breakpoints,
+        stop_on_entry=bool(args.stop_on_entry),
+        idle_timeout=float(args.idle_timeout),
+        start_timeout=float(args.start_timeout),
+        context_lines=int(args.context_lines),
+        listen_port=args.listen,
+        use_bps_file=bool(args.use_bps_file),
+        no_write_bps_file=bool(args.no_write_bps_file),
+    )
+    if result["status"] == "error":
+        _emit_error(args, result["message"], error_type=result.get("error_type", "usage"))
+        return int(result.get("exit_code", 2))
+    _emit(args, result["payload"])
+    return int(result.get("exit_code", 0))
 
-    script_args = list(args.script_args or [])
+
+def start_session_inline(
+    *,
+    cwd: Path,
+    session_name: str,
+    script: str,
+    script_args: list[str],
+    breakpoints: list[dict[str, Any]],
+    stop_on_entry: bool = False,
+    idle_timeout: float = 1800.0,
+    start_timeout: float = 30.0,
+    context_lines: int = 5,
+    listen_port: int | None = None,
+    use_bps_file: bool = False,
+    no_write_bps_file: bool = False,
+) -> dict[str, Any]:
+    """Start a session (or VS Code listen-mode spawn) without going through argparse.
+
+    Returns ``{"status": "ok", "payload": {...}, "exit_code": int}`` on success
+    or ``{"status": "error", "error_type": ..., "message": ..., "exit_code": int}``.
+    ``--listen`` short-circuits the daemon: we spawn the debuggee in
+    ``debugpy --listen --wait-for-client`` mode and return its attach URL.
+    """
+    ensure_state_dir(cwd)
+    sdir = session_dir(cwd, session_name)
+    meta_path = sdir / "meta.json"
+
+    existing = _read_meta(meta_path)
+    if existing is not None:
+        pid = existing.get("pid")
+        if isinstance(pid, int) and is_pid_alive(pid):
+            return {
+                "status": "error",
+                "error_type": "session_exists",
+                "message": f"session {session_name!r} already running (pid={pid})",
+                "exit_code": 2,
+            }
+        shutil.rmtree(sdir, ignore_errors=True)
+
+    raw_script = Path(script)
+    script_path = (
+        (cwd / raw_script).resolve() if not raw_script.is_absolute() else raw_script.resolve()
+    )
+    if not script_path.exists():
+        return {
+            "status": "error",
+            "error_type": "not_found",
+            "message": f"script not found: {script_path}",
+            "exit_code": 2,
+        }
+
+    if listen_port is not None:
+        return _spawn_listen_mode(
+            cwd=cwd,
+            session_name=session_name,
+            script_path=script_path,
+            script_args=script_args,
+            listen_port=int(listen_port),
+        )
+
+    # Optionally merge the shared breakpoints file into the initial set so the
+    # daemon launches with everything the user has tracked across sessions.
+    if use_bps_file:
+        shared = read_breakpoints(cwd)
+        # Normalize relative paths in the shared file to absolute against cwd
+        # so the daemon and the file agree on identity.
+        normalized: list[dict[str, Any]] = []
+        for entry in shared:
+            file = Path(entry["file"])
+            file = (cwd / file).resolve() if not file.is_absolute() else file.resolve()
+            normalized.append(
+                {
+                    "file": str(file),
+                    "line": entry["line"],
+                    "condition": entry.get("condition"),
+                }
+            )
+        breakpoints = merge_breakpoints(breakpoints, normalized)
 
     sdir.mkdir(parents=True, exist_ok=True)
     meta: dict[str, Any] = {
-        "session_id": args.session,
-        "script": str(script),
+        "session_id": session_name,
+        "script": str(script_path),
         "args": script_args,
         "cwd": str(cwd),
         "breakpoints": breakpoints,
-        "stop_on_entry": bool(args.stop_on_entry),
+        "stop_on_entry": stop_on_entry,
         "exception_filters": [],
         "listen_port": None,
-        "idle_timeout_seconds": float(args.idle_timeout),
-        "start_timeout_seconds": float(args.start_timeout),
-        "source_context_lines": int(args.context_lines),
+        "idle_timeout_seconds": idle_timeout,
+        "start_timeout_seconds": start_timeout,
+        "source_context_lines": context_lines,
+        "use_bps_file": use_bps_file,
+        "write_bps_file": not no_write_bps_file,
         "pid": None,
         "control_port": None,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -413,31 +511,113 @@ def cmd_start(args: argparse.Namespace) -> int:
     if control_port is None:
         _terminate_daemon(proc.pid)
         shutil.rmtree(sdir, ignore_errors=True)
-        _emit_error(
-            args,
-            "session daemon failed to start (no control port within timeout)",
-            error_type="daemon_failed",
-        )
-        return 2
+        return {
+            "status": "error",
+            "error_type": "daemon_failed",
+            "message": "session daemon failed to start (no control port within timeout)",
+            "exit_code": 2,
+        }
 
     try:
-        resp = _request(control_port, "start_result", timeout=max(args.start_timeout, 5.0))
+        resp = _request(control_port, "start_result", timeout=max(start_timeout, 5.0))
     except (OSError, TimeoutError) as exc:
         _terminate_daemon(proc.pid)
         shutil.rmtree(sdir, ignore_errors=True)
-        _emit_error(args, f"failed to talk to session daemon: {exc}", error_type="daemon_failed")
-        return 2
+        return {
+            "status": "error",
+            "error_type": "daemon_failed",
+            "message": f"failed to talk to session daemon: {exc}",
+            "exit_code": 2,
+        }
 
     if resp.get("status") != "ok":
-        _emit(args, resp)
-        return 2
+        # Surface the daemon's structured error verbatim.
+        return {
+            "status": "error",
+            "error_type": str(resp.get("error_type") or "daemon_failed"),
+            "message": str(resp.get("message") or "daemon returned error"),
+            "exit_code": 2,
+        }
 
     result = resp.get("result")
     if not isinstance(result, dict):
-        _emit_error(args, "malformed daemon response", error_type="protocol")
-        return 2
-    _emit(args, result)
-    return 0
+        return {
+            "status": "error",
+            "error_type": "protocol",
+            "message": "malformed daemon response",
+            "exit_code": 2,
+        }
+    return {"status": "ok", "payload": result, "exit_code": 0}
+
+
+def _spawn_listen_mode(
+    *,
+    cwd: Path,
+    session_name: str,
+    script_path: Path,
+    script_args: list[str],
+    listen_port: int,
+) -> dict[str, Any]:
+    """Spawn ``python -m debugpy --listen --wait-for-client`` and return attach info.
+
+    This is the VS Code remote-attach path. We don't connect a DAP client of
+    our own — debugpy in this mode accepts a single client, so giving it to
+    VS Code is the whole point. We block until the port is listening so the
+    caller can start their editor with confidence.
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "debugpy",
+        "--listen",
+        f"127.0.0.1:{listen_port}",
+        "--wait-for-client",
+        str(script_path),
+        *script_args,
+    ]
+    kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "cwd": str(cwd),
+        "close_fds": True,
+    }
+    if sys.platform == "win32":
+        DETACHED_PROCESS = 0x00000008
+        kwargs["creationflags"] = DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd, **kwargs)
+
+    if not _wait_port_listening("127.0.0.1", listen_port, timeout=10.0):
+        _terminate_daemon(proc.pid)
+        return {
+            "status": "error",
+            "error_type": "daemon_failed",
+            "message": f"debugpy did not start listening on 127.0.0.1:{listen_port}",
+            "exit_code": 2,
+        }
+    payload = {
+        "status": "listening",
+        "session": session_name,
+        "pid": proc.pid,
+        "attach_url": f"debugpy://127.0.0.1:{listen_port}",
+        "host": "127.0.0.1",
+        "port": listen_port,
+        "script": str(script_path),
+    }
+    return {"status": "ok", "payload": payload, "exit_code": 0}
+
+
+def _wait_port_listening(host: str, port: int, *, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.1)
+    return False
 
 
 def _spawn_daemon(meta_path: Path) -> subprocess.Popen[bytes]:

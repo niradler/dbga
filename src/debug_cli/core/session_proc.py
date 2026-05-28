@@ -30,6 +30,12 @@ from debug_cli.core.auto_context import build_context
 from debug_cli.core.dap_client import DapError
 from debug_cli.core.dap_session import DapSession
 from debug_cli.core.dap_types import Breakpoint, StoppedContext
+from debug_cli.core.state import (
+    merge_breakpoints,
+    read_breakpoints,
+    remove_breakpoint,
+    write_breakpoints,
+)
 
 _ACCEPT_POLL_TIMEOUT = 0.5  # how often the accept loop re-checks shutdown flag
 _DEFAULT_OP_TIMEOUT = 30.0
@@ -113,6 +119,38 @@ def _parse_bp_spec(spec: str, *, allow_condition: bool = True) -> Breakpoint | N
 
 def _bp_key(file: Path) -> Path:
     return file.resolve()
+
+
+def _shared_bps_cwd(state: _SessionState) -> Path | None:
+    """Return the cwd under which to persist the shared breakpoints file, if enabled."""
+    if not state.start_meta.get("write_bps_file", True):
+        return None
+    cwd_value = state.start_meta.get("cwd")
+    return Path(str(cwd_value)) if cwd_value else None
+
+
+def _shared_bps_add(state: _SessionState, bp: Breakpoint) -> None:
+    cwd = _shared_bps_cwd(state)
+    if cwd is None:
+        return
+    with contextlib.suppress(OSError):
+        existing = read_breakpoints(cwd)
+        merged = merge_breakpoints(
+            existing,
+            [{"file": str(bp.file), "line": bp.line, "condition": bp.condition}],
+        )
+        write_breakpoints(cwd, merged)
+
+
+def _shared_bps_remove(state: _SessionState, file: Path, line: int) -> None:
+    cwd = _shared_bps_cwd(state)
+    if cwd is None:
+        return
+    with contextlib.suppress(OSError):
+        existing = read_breakpoints(cwd)
+        updated = remove_breakpoint(existing, str(file), line)
+        if updated != existing:
+            write_breakpoints(cwd, updated)
 
 
 _Handler = Callable[["_SessionState", dict[str, Any]], dict[str, Any]]
@@ -366,6 +404,7 @@ def _handle_set_bp(state: _SessionState, args: dict[str, Any]) -> dict[str, Any]
     existing.append(bp)
     state.bps_by_file[key] = existing
     dap_bps, warnings = state.session.set_breakpoints_with_warnings(key, existing)
+    _shared_bps_add(state, bp)
     return {"status": "ok", "result": {"breakpoints": dap_bps, "warnings": warnings}}
 
 
@@ -386,6 +425,7 @@ def _handle_clear_bp(state: _SessionState, args: dict[str, Any]) -> dict[str, An
         state.temp_bps[key].discard(int(line))
         if not state.temp_bps[key]:
             state.temp_bps.pop(key, None)
+    _shared_bps_remove(state, key, int(line))
     return {"status": "ok", "result": {"breakpoints": dap_bps}}
 
 
