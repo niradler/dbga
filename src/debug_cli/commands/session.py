@@ -78,7 +78,7 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
         action="append",
         default=[],
         dest="break_at",
-        help="Breakpoint as <file>:<line>. Repeatable.",
+        help="Breakpoint as <file>:<line>[:condition]. Repeatable.",
     )
     p_start.add_argument(
         "--stop-on-entry",
@@ -376,13 +376,13 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Resolve break-at specs to dicts up-front so the inline helper gets normalized input.
     breakpoints: list[dict[str, Any]] = []
     for spec in args.break_at:
-        parsed = _parse_break_at(spec)
+        parsed = _parse_bp_with_condition(spec)
         if parsed is None:
-            _emit_error(args, f"invalid --break-at {spec!r}; expected <file>:<line>")
+            _emit_error(args, f"invalid --break-at {spec!r}; expected <file>:<line>[:condition]")
             return 2
-        file, line = parsed
+        file, line, condition = parsed
         file = (cwd / file).resolve() if not file.is_absolute() else file.resolve()
-        breakpoints.append({"file": str(file), "line": line, "condition": None})
+        breakpoints.append({"file": str(file), "line": line, "condition": condition})
 
     result = start_session_inline(
         cwd=cwd,
