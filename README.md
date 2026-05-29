@@ -143,36 +143,41 @@ they belong next to the code. Add `.debug-agent/` to your `.gitignore`:
         └── lock              # liveness marker
 ```
 
-## The `debug-agent` Skill
+## The `debug-agent` Claude Code plugin
 
-`plugin/skills/debug-agent/` contains a Claude / agent skill that teaches
-evidence-first debugging on top of `dbga`. It ships inside the `debug-agent`
-Claude Code plugin (see [`plugin/README.md`](plugin/README.md)) and includes:
+`plugin/` is a [Claude Code plugin](https://docs.claude.com/en/docs/claude-code)
+that bundles `dbga` with a full design → develop → debug → verify → clean-up
+workflow for Python, Go, and Node/TypeScript:
 
-- **`SKILL.md`** — when to trigger, decision tree, mindset
-- **`references/workflow.md`** — the evidence-first loop
-- **`references/log-monitoring.md`** — using `watch`
-- **`references/localization.md`** — `localize` and `diagnose`
-- **`references/instrumentation.md`** — reversible probes
-- **`references/debugger.md`** — driving `session`
-- **`references/vscode-collab.md`** — `--listen` + shared breakpoints
-- **`references/advanced.md`** — hang / deadlock / concurrency / wolf-fence
+- **Skills** (`/debug-agent:*`): `debug-agent` (the evidence-first `dbga` driver),
+  plus `python`, `go`, `node` development skills that route to language-specific
+  references on demand.
+- **Agents** (`/agents`): `architect` (orchestrator) and `python-expert`,
+  `go-expert`, `node-expert`.
+- **Command:** `/debug-agent:setup` — optional one-shot `dbga` installer.
 
-### Install the skill
+Full plugin docs: [`plugin/README.md`](plugin/README.md).
 
-The recommended path is [`npx skills`](https://github.com/vercel-labs/skills),
-the open agent-skills installer. It reads `SKILL.md` straight from the GitHub
-repo and drops it into `~/.claude/skills/` (or your agent host's equivalent):
+### Install — full plugin (recommended)
 
 ```sh
-# Install just this skill
-npx skills add niradler/dbga --skill debug-agent
-
-# Or preview what's available first
-npx skills add niradler/dbga --list
+claude plugin marketplace add niradler/dbga
+/plugin install debug-agent@dbga
+/debug-agent:setup            # optional: installs the dbga CLI
 ```
 
-Manual install also works:
+### Install — a single skill
+
+The [`skills`](https://github.com/vercel-labs/skills) CLI installs any one skill
+standalone (skills only — agents/commands come with the full plugin). Resolution
+is automatic via the repo-root marketplace manifest; no `--full-depth` needed:
+
+```sh
+npx skills add niradler/dbga --skill python   # or: go | node | debug-agent
+npx skills add niradler/dbga --list           # preview what's available
+```
+
+Manual install of just the debugger skill also works:
 
 ```sh
 # Linux / macOS
@@ -182,9 +187,16 @@ cp -r plugin/skills/debug-agent ~/.claude/skills/
 Copy-Item -Recurse plugin/skills/debug-agent $env:USERPROFILE\.claude\skills\
 ```
 
-> Installing the full plugin (`/plugin install debug-agent@dbga`) brings this
-> skill plus the `python`/`go`/`node` skills and the agents — see
-> [`plugin/README.md`](plugin/README.md).
+### What the `debug-agent` skill covers
+
+- **`SKILL.md`** — when to trigger, decision tree, mindset
+- **`references/workflow.md`** — the evidence-first loop
+- **`references/log-monitoring.md`** — using `watch`
+- **`references/localization.md`** — `localize` and `diagnose`
+- **`references/instrumentation.md`** — reversible probes
+- **`references/debugger.md`** — driving `session`
+- **`references/vscode-collab.md`** — `--listen` + shared breakpoints
+- **`references/advanced.md`** — hang / deadlock / concurrency / wolf-fence
 
 ## Development
 
