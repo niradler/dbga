@@ -1,0 +1,7 @@
+{
+  "name": "dbga",
+  "owner": { "name": "Nir Adler" },
+  "plugins": [
+    { "name": "debug-agent", "source": "./plugin" }
+  ]
+}
