@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,13 @@ class DapSession:
         # reassigned to the newest child when startDebugging fires.
         self._adapter_host: str = "127.0.0.1"
         self._adapter_port: int = 0
+        # ``startDebugging`` reverse-requests fire on the parent client's
+        # READER THREAD, so ``_on_start_debugging`` mutates ``_child_clients``
+        # and ``_active_client`` concurrently with the main thread reading
+        # them in ``_poll_any_client`` / ``release`` / ``_require_client``.
+        # This lock guards every read and write of both; callers iterate over
+        # a snapshot taken under the lock, never the live list.
+        self._clients_lock = threading.Lock()
         self._child_clients: list[DapClient] = []
         self._active_client: DapClient | None = None
         self._adapter_proc: subprocess.Popen[bytes] | None = None
@@ -132,7 +140,8 @@ class DapSession:
             client = DapClient()
             client.attach_socket(sock)
             self._client = client
-            self._active_client = client
+            with self._clients_lock:
+                self._active_client = client
             # Adapters that delegate to child sessions (vscode-js-debug)
             # will send this reverse-request after their initial ``launch``.
             # Harmless to register for adapters that never send it.
@@ -178,12 +187,16 @@ class DapSession:
         if self._state == "released":
             return
         # Tear down child sessions before the parent, so the parent is
-        # still alive to receive their disconnect frames.
-        for child in self._child_clients:
+        # still alive to receive their disconnect frames. Snapshot-and-clear
+        # under the lock so a ``startDebugging`` racing on the reader thread
+        # can't slip a child past the teardown loop or resurrect the list.
+        with self._clients_lock:
+            children = list(self._child_clients)
+            self._child_clients = []
+            self._active_client = None
+        for child in children:
             with contextlib.suppress(Exception):
                 child.disconnect()
-        self._child_clients = []
-        self._active_client = None
         client = self._client
         self._client = None
         if client is not None:
@@ -242,7 +255,8 @@ class DapSession:
                 # The client that emitted ``stopped`` owns the live debuggee
                 # from now on. For multi-process js-debug runs, this might
                 # switch back and forth across child sessions.
-                self._active_client = source
+                with self._clients_lock:
+                    self._active_client = source
                 reason = str(body.get("reason", ""))
                 self._state = "stopped"
                 return self._build_stopped_context(reason)
@@ -278,12 +292,17 @@ class DapSession:
         return None, None
 
     def _live_clients(self) -> list[DapClient]:
-        """Parent + child clients, in poll order (children first — they own the live debuggee)."""
+        """Parent + child clients, in poll order (children first — they own the live debuggee).
+
+        Snapshots ``_child_clients`` under the lock so a ``startDebugging``
+        appending on the reader thread can't mutate the list mid-iteration.
+        """
         out: list[DapClient] = []
         # Children first so that for vscode-js-debug, the actually-stopping
         # session's events surface promptly instead of being starved by
         # bookkeeping events on the parent.
-        out.extend(self._child_clients)
+        with self._clients_lock:
+            out.extend(self._child_clients)
         if self._client is not None:
             out.append(self._client)
         return out
@@ -472,7 +491,8 @@ class DapSession:
         For adapters that delegate to a child session (vscode-js-debug),
         this is the most recent child. For everything else it's the parent.
         """
-        client = self._active_client or self._client
+        with self._clients_lock:
+            client = self._active_client or self._client
         if client is None:
             raise RuntimeError("session has no active DAP client")
         return client
@@ -513,8 +533,19 @@ class DapSession:
         child.configuration_done()
         child.wait_response(child_seq, request_type, timeout=15.0)
 
-        self._child_clients.append(child)
-        self._active_client = child
+        # Publish the child under the lock. If ``release`` already ran (state
+        # flipped to "released"), don't resurrect a torn-down session — close
+        # the freshly-opened child instead of leaking it.
+        with self._clients_lock:
+            if self._state == "released":
+                stale = True
+            else:
+                self._child_clients.append(child)
+                self._active_client = child
+                stale = False
+        if stale:
+            with contextlib.suppress(Exception):
+                child.disconnect()
         # DAP startDebugging response body is unspecified; empty is correct.
         return {}
 

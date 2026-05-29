@@ -175,3 +175,24 @@ def test_find_dap_server_errors_when_env_var_points_at_missing_file(
     monkeypatch.setenv("DBGA_JS_DEBUG_SERVER", str(tmp_path / "missing.js"))
     with pytest.raises(RuntimeError, match="does not exist"):
         find_dap_server()
+
+
+def test_latest_js_debug_extension_picks_highest_numeric_version(tmp_path: Path) -> None:
+    """1.10.0 must beat 1.9.0 — a plain string sort gets this wrong."""
+    from debug_agent.adapters.node import _latest_js_debug_extension
+
+    for ver in ("1.9.0", "1.10.0", "1.2.0"):
+        (tmp_path / f"ms-vscode.js-debug-{ver}").mkdir()
+    # An unrelated extension must be ignored.
+    (tmp_path / "ms-python.python-2024.1.0").mkdir()
+
+    latest = _latest_js_debug_extension(tmp_path)
+    assert latest is not None
+    assert latest.name == "ms-vscode.js-debug-1.10.0"
+
+
+def test_latest_js_debug_extension_none_when_absent(tmp_path: Path) -> None:
+    from debug_agent.adapters.node import _latest_js_debug_extension
+
+    (tmp_path / "ms-python.python-2024.1.0").mkdir()
+    assert _latest_js_debug_extension(tmp_path) is None

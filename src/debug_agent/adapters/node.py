@@ -28,9 +28,15 @@ Notes:
   * **TypeScript is supported transparently** when ``ts-node`` / ``tsx`` is
     on PATH and the script imports register hooks — vscode-js-debug follows
     source maps automatically.
-  * **Worker threads and ``child_process`` children** are also debuggable
-    via the same nested-session mechanism (handler is registered
-    recursively on child clients).
+  * **Single launched process is the validated path.** The
+    ``startDebugging`` reverse-handler is registered recursively on child
+    clients, so worker-thread / ``child_process`` sub-sessions DO attach —
+    but ``DapSession.wait_for_stop`` currently treats the first ``exited``
+    from any session as terminal, so a multi-process run ends when its
+    first sub-process exits. Full multi-process lifecycle (keeping the
+    session alive until the last child exits) is future work; today's
+    end-to-end coverage is single-process launch → stop → continue →
+    terminate.
 """
 
 from __future__ import annotations
@@ -160,13 +166,34 @@ def _vscode_extension_roots() -> list[Path]:
     return [c for c in candidates if c.is_dir()]
 
 
+def _extension_version_key(path: Path) -> tuple[int, ...]:
+    """Parse the trailing ``-X.Y.Z`` semver off an extension dir for sorting.
+
+    A plain string sort is wrong: ``ms-vscode.js-debug-1.9.0`` would sort
+    *after* ``ms-vscode.js-debug-1.10.0`` because ``'9' > '1'``. Parsing each
+    dotted segment to an int gives correct numeric ordering. Non-numeric or
+    missing version → ``(0,)`` so it loses to any real version.
+    """
+    name = path.name
+    _, _, version = name.partition("ms-vscode.js-debug-")
+    if not version:
+        return (0,)
+    parts: list[int] = []
+    for seg in version.split("."):
+        # Stop at the first non-numeric segment (e.g. a pre-release suffix).
+        if not seg.isdigit():
+            break
+        parts.append(int(seg))
+    return tuple(parts) if parts else (0,)
+
+
 def _latest_js_debug_extension(extensions_dir: Path) -> Path | None:
     """Pick the newest ``ms-vscode.js-debug-*`` extension directory under root."""
     candidates = [p for p in extensions_dir.glob("ms-vscode.js-debug*") if p.is_dir()]
     if not candidates:
         return None
-    # Sort by directory name (which embeds the version) so the newest wins.
-    candidates.sort(key=lambda p: p.name)
+    # Sort by parsed numeric version so 1.10.0 beats 1.9.0 (string sort doesn't).
+    candidates.sort(key=_extension_version_key)
     return candidates[-1]
 
 
@@ -260,9 +287,10 @@ class NodeAdapter(Adapter):
         cwd: Path | None,
         stop_on_entry: bool,
     ) -> dict[str, Any]:
-        # vscode-js-debug uses the ``pwa-node`` (Preview Wildcat-Analytics, the
-        # internal "v2" debugger) type identifier. ``skipFiles`` keeps the
-        # stop-on-entry from landing in Node's own internal bootstrap files.
+        # vscode-js-debug uses the ``pwa-node`` type identifier ("pwa" is a
+        # historical prefix from the debugger's Progressive-Web-App origins;
+        # it's the modern "v2" Node debugger). ``skipFiles`` keeps stop-on-entry
+        # from landing in Node's own internal bootstrap files.
         payload: dict[str, Any] = {
             "type": "pwa-node",
             "request": "launch",

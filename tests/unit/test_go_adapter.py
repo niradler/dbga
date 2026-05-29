@@ -121,6 +121,30 @@ def test_go_fatal_runtime_parse_skips_runtime_frames() -> None:
     assert not parsed.deepest_user_frame.func.startswith("runtime.")
 
 
+def test_go_method_receiver_func_names_not_truncated() -> None:
+    """Pointer-receiver frames like ``(*Server).Handle`` keep their full func name.
+
+    Regression guard: a non-greedy func regex stops at the first ``(`` inside
+    ``(*Server)`` and captures a truncated ``github.com/.../server.`` name.
+    """
+    adapter = get_adapter("go")
+    text = (FIXTURES / "go_method_panic.txt").read_text(encoding="utf-8")
+    parsed = adapter.parse_traceback(text)
+
+    assert parsed.error_type == "panic"
+    funcs = [f.func for f in parsed.frames]
+    assert "github.com/acme/app/server.(*Server).Handle" in funcs
+    assert "github.com/acme/app/server.(*Server).ServeHTTP" in funcs
+    assert "main.main" in funcs
+    # No frame should have a func name truncated at the receiver's open-paren.
+    assert not any(f.func.endswith(".") for f in parsed.frames)
+
+    # Deepest user frame is the panic site — the first (innermost) method.
+    assert parsed.deepest_user_frame is not None
+    assert parsed.deepest_user_frame.func == "github.com/acme/app/server.(*Server).Handle"
+    assert parsed.deepest_user_frame.line == 42
+
+
 def test_go_parser_handles_empty_input() -> None:
     parsed = get_adapter("go").parse_traceback("")
     assert parsed.frames == []

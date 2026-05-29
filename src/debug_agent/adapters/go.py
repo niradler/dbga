@@ -28,10 +28,16 @@ from debug_agent.core.tracebacks import ParsedTraceback, TracebackFrame
 _GOROUTINE_RE = re.compile(r"^goroutine\s+(\d+)\s+\[([^\]]+)\]:\s*$")
 
 # The function-call header inside a goroutine dump:
-#   ``main.processItems(0xc0000180c0, 0x3, 0x3)``
-#   ``github.com/x/y/pkg.(*Server).Handle(0xc0000180c0)``
+#   ``main.processItems({0xc000018180, 0x3, 0x3})``
+#   ``github.com/x/y/pkg.(*Server).Handle(0xc0000180c0)``   ← method receiver
 #   ``runtime.gopanic(0x10b0e80, 0xc0000180c0)``
-_FUNC_RE = re.compile(r"^(?P<func>[^\s][^\s]*?)\((?P<args>.*)\)\s*$")
+#   ``main.Map[...](0x...)``                                  ← generic
+#   ``main.main.func1()``                                    ← closure
+# The func name is the non-space token *before the final argument-parens*.
+# A greedy ``\S+`` backtracks to the LAST ``(`` so embedded parens in a
+# pointer-receiver name like ``(*Server)`` stay part of the func — a
+# non-greedy match would wrongly stop at that first inner ``(``.
+_FUNC_RE = re.compile(r"^(?P<func>\S+)\((?P<args>.*)\)\s*$")
 
 # The source-location line that follows a function header:
 #   ``\t/abs/path/main.go:15 +0x9e``
