@@ -42,6 +42,19 @@ A probe is inserted **before** the target line, at the indentation of that targe
 
 The kind is metadata for `instrument list` and your own filtering; it doesn't change the insertion logic.
 
+### Language note — probes are Python-flavored
+
+The `--code` examples above are Python, and there are **no language-aware probe templates** for Go or Node today. The insert/snapshot/revert mechanism is fully language-agnostic — it just splices a line of text into the file and snapshots the original — so you *can* `instrument add` against a `.go` or `.js`/`.ts` file. You simply have to write the probe in the target language yourself:
+
+```powershell
+# Go
+dbga instrument add main.go:42 --kind log --code "fmt.Printf(\"items=%v\\n\", items)"
+# Node
+dbga instrument add app.js:42 --kind log --code "console.log('items=', items);"
+```
+
+`instrument revert` / `revert --all` restore the file exactly the same way regardless of language. The usual caveats apply: indentation is matched to the target line, and a syntactically broken probe will fail at compile/run — `revert --all` is the escape hatch.
+
 ## State
 
 All instrumentation is tracked in `.debug-agent/instrumentation.json` with original-file snapshots stored alongside. The id (`secrets.token_hex(4)`) lets `revert <id>` target one probe. Snapshots are file-level — `revert` restores the entire file to its pre-instrumentation state, so don't hand-edit a file *while* it has probes in it (or your edits will be lost on revert).

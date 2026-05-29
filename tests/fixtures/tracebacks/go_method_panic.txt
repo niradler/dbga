@@ -1,0 +1,9 @@
+panic: nil pointer dereference
+
+goroutine 1 [running]:
+github.com/acme/app/server.(*Server).Handle(0xc0000180c0, {0x10b3c91, 0x3})
+	/home/user/app/server/handler.go:42 +0x1a5
+github.com/acme/app/server.(*Server).ServeHTTP(0xc0000180c0, 0xc000124000, 0xc000130000)
+	/home/user/app/server/server.go:88 +0x9e
+main.main()
+	/home/user/app/main.go:17 +0x68

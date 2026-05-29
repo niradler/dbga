@@ -1,0 +1,375 @@
+"""Node.js adapter — drives vscode-js-debug's ``dapDebugServer.js``.
+
+vscode-js-debug is the official Node DAP adapter (the one VS Code itself
+uses). Its DAP server entry point is ``dapDebugServer.js``; we spawn
+``node <dapDebugServer.js> <port> 127.0.0.1`` and drive a normal DAP
+``initialize`` / ``launch`` handshake through it.
+
+Resolution order for ``dapDebugServer.js`` (first match wins):
+  1. ``$DBGA_JS_DEBUG_SERVER`` — explicit absolute path (CI / vendored installs).
+  2. The newest ``ms-vscode.js-debug-*`` extension under VS Code / Cursor /
+     VS Code Insiders' extensions directory — ``dist/src/dapDebugServer.js``.
+  3. A manual install at ``~/.local/share/js-debug/src/dapDebugServer.js``
+     (POSIX) or ``%LOCALAPPDATA%\\js-debug\\src\\dapDebugServer.js`` (Windows).
+
+vscode-js-debug is **not** published to npm. The install hint surfaced by
+``find_dap_server`` directs users to extract the official tarball from
+https://github.com/microsoft/vscode-js-debug/releases, or to install
+VS Code (which bundles it as a built-in extension).
+
+The full launch flow works end-to-end: vscode-js-debug delegates every
+launched program to a child DAP session via a reverse ``startDebugging``
+request, which :class:`DapClient` + :class:`DapSession` now handle
+transparently (each child opens a fresh TCP connection to the same
+``dapDebugServer.js`` and becomes the active session for stops, steps,
+continues, and evaluations).
+
+Notes:
+  * **TypeScript is supported transparently** when ``ts-node`` / ``tsx`` is
+    on PATH and the script imports register hooks — vscode-js-debug follows
+    source maps automatically.
+  * **Single launched process is the validated path.** The
+    ``startDebugging`` reverse-handler is registered recursively on child
+    clients, so worker-thread / ``child_process`` sub-sessions DO attach —
+    but ``DapSession.wait_for_stop`` currently treats the first ``exited``
+    from any session as terminal, so a multi-process run ends when its
+    first sub-process exits. Full multi-process lifecycle (keeping the
+    session alive until the last child exits) is future work; today's
+    end-to-end coverage is single-process launch → stop → continue →
+    terminate.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, ClassVar
+
+from debug_agent.adapters.base import Adapter
+from debug_agent.core.process import windows_no_window_flags
+from debug_agent.core.tracebacks import ParsedTraceback, TracebackFrame
+
+# ---- V8 stack-trace parser ------------------------------------------------
+
+# Header line for unhandled errors:
+#   ``Error: something broke``
+#   ``TypeError: Cannot read properties of undefined (reading 'foo')``
+#   ``ReferenceError: x is not defined``
+_ERROR_HEADER_RE = re.compile(
+    r"^\s*(?P<type>[A-Z]\w*(?:Error|Exception|Warning))(?::\s*(?P<msg>.*))?$"
+)
+
+# V8 stack frame, full form: ``    at fnName (/path/file.js:line:col)``
+_FRAME_NAMED_RE = re.compile(
+    r"^\s*at\s+(?P<func>.+?)\s+\((?P<file>.+?):(?P<line>\d+):(?P<col>\d+)\)\s*$"
+)
+
+# V8 stack frame, anonymous: ``    at /path/file.js:line:col``
+_FRAME_ANON_RE = re.compile(r"^\s*at\s+(?P<file>.+?):(?P<line>\d+):(?P<col>\d+)\s*$")
+
+# Frames whose file path contains one of these markers are non-user code.
+_LIB_MARKERS = ("node_modules", "node:internal/", "internal/process/")
+
+
+def _is_library_path(path: str) -> bool:
+    if path.startswith("node:"):
+        return True
+    return any(marker in path for marker in _LIB_MARKERS)
+
+
+def _parse_node_traceback(text: str) -> ParsedTraceback:
+    parsed = ParsedTraceback(raw=text)
+    lines = text.splitlines()
+
+    frames: list[TracebackFrame] = []
+    for line in lines:
+        # Header — first ``Error: ...`` style line wins.
+        if not parsed.error_type:
+            m_err = _ERROR_HEADER_RE.match(line)
+            if m_err:
+                parsed.error_type = m_err.group("type")
+                parsed.message = (m_err.group("msg") or "").strip()
+                continue
+
+        m = _FRAME_NAMED_RE.match(line)
+        if m:
+            frames.append(
+                TracebackFrame(
+                    file=m.group("file"),
+                    line=int(m.group("line")),
+                    func=m.group("func"),
+                    code="",
+                    is_user_code=not _is_library_path(m.group("file")),
+                )
+            )
+            continue
+        m_anon = _FRAME_ANON_RE.match(line)
+        if m_anon:
+            frames.append(
+                TracebackFrame(
+                    file=m_anon.group("file"),
+                    line=int(m_anon.group("line")),
+                    func="<anonymous>",
+                    code="",
+                    is_user_code=not _is_library_path(m_anon.group("file")),
+                )
+            )
+
+    # V8 prints stack newest-first (failure site at the top). Flip to
+    # oldest-first so the shared ``deepest_user_frame`` heuristic — which
+    # walks frames in reverse — lands on the failure site.
+    frames.reverse()
+    parsed.frames = frames
+
+    for frame in reversed(frames):
+        if frame.is_user_code:
+            parsed.deepest_user_frame = frame
+            break
+    if parsed.deepest_user_frame is None and frames:
+        parsed.deepest_user_frame = frames[-1]
+
+    return parsed
+
+
+# ---- vscode-js-debug location -------------------------------------------
+
+# Inside an installed VS Code extension: ``dist/src/dapDebugServer.js``.
+_EXTENSION_DAP_REL = Path("dist") / "src" / "dapDebugServer.js"
+
+# Inside a manual GitHub-release extraction: ``src/dapDebugServer.js``.
+_MANUAL_DAP_REL = Path("src") / "dapDebugServer.js"
+
+_INSTALL_HINT = (
+    "vscode-js-debug is not installed. Either: (a) install VS Code (it ships "
+    "vscode-js-debug as a built-in extension); (b) extract the latest "
+    "`js-debug-dap-vX.Y.Z.tar.gz` from "
+    "https://github.com/microsoft/vscode-js-debug/releases into "
+    "~/.local/share/ (POSIX) or %LOCALAPPDATA% (Windows); or (c) set "
+    "$DBGA_JS_DEBUG_SERVER to an explicit dapDebugServer.js path."
+)
+
+
+def _vscode_extension_roots() -> list[Path]:
+    """Per-user extension directories for VS Code / Cursor / Insiders."""
+    home = Path.home()
+    candidates = [
+        home / ".vscode" / "extensions",
+        home / ".vscode-insiders" / "extensions",
+        home / ".vscode-server" / "extensions",  # remote-SSH host
+        home / ".cursor" / "extensions",
+        home / ".windsurf" / "extensions",
+    ]
+    return [c for c in candidates if c.is_dir()]
+
+
+def _extension_version_key(path: Path) -> tuple[int, ...]:
+    """Parse the trailing ``-X.Y.Z`` semver off an extension dir for sorting.
+
+    A plain string sort is wrong: ``ms-vscode.js-debug-1.9.0`` would sort
+    *after* ``ms-vscode.js-debug-1.10.0`` because ``'9' > '1'``. Parsing each
+    dotted segment to an int gives correct numeric ordering. Non-numeric or
+    missing version → ``(0,)`` so it loses to any real version.
+    """
+    name = path.name
+    _, _, version = name.partition("ms-vscode.js-debug-")
+    if not version:
+        return (0,)
+    parts: list[int] = []
+    for seg in version.split("."):
+        # Stop at the first non-numeric segment (e.g. a pre-release suffix).
+        if not seg.isdigit():
+            break
+        parts.append(int(seg))
+    return tuple(parts) if parts else (0,)
+
+
+def _latest_js_debug_extension(extensions_dir: Path) -> Path | None:
+    """Pick the newest ``ms-vscode.js-debug-*`` extension directory under root."""
+    candidates = [p for p in extensions_dir.glob("ms-vscode.js-debug*") if p.is_dir()]
+    if not candidates:
+        return None
+    # Sort by parsed numeric version so 1.10.0 beats 1.9.0 (string sort doesn't).
+    candidates.sort(key=_extension_version_key)
+    return candidates[-1]
+
+
+def _manual_install_roots() -> list[Path]:
+    """Common locations a user might extract the GitHub-release tarball to."""
+    home = Path.home()
+    roots = [
+        home / ".local" / "share" / "js-debug",
+        home / "js-debug",
+    ]
+    if sys.platform == "win32":
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            roots.append(Path(local_appdata) / "js-debug")
+    return roots
+
+
+def find_dap_server() -> Path:
+    """Locate ``dapDebugServer.js`` or raise ``RuntimeError`` with install hint."""
+    explicit = os.environ.get("DBGA_JS_DEBUG_SERVER")
+    if explicit:
+        path = Path(explicit)
+        if path.is_file():
+            return path
+        raise RuntimeError(
+            f"$DBGA_JS_DEBUG_SERVER points at {explicit!r} but that file does not exist."
+        )
+
+    # VS Code / Cursor / Insiders extension installs.
+    for ext_root in _vscode_extension_roots():
+        ext = _latest_js_debug_extension(ext_root)
+        if ext is not None:
+            candidate = ext / _EXTENSION_DAP_REL
+            if candidate.is_file():
+                return candidate
+
+    # Manual tarball extractions.
+    for root in _manual_install_roots():
+        candidate = root / _MANUAL_DAP_REL
+        if candidate.is_file():
+            return candidate
+
+    raise RuntimeError(_INSTALL_HINT)
+
+
+# ---- adapter ---------------------------------------------------------------
+
+
+class NodeAdapter(Adapter):
+    name: ClassVar[str] = "node"
+    file_extensions: ClassVar[tuple[str, ...]] = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts")
+    interpreter_basenames: ClassVar[frozenset[str]] = frozenset(
+        {"node", "ts-node", "tsx", "node.exe", "ts-node.exe", "tsx.exe"}
+    )
+    # vscode-js-debug runs the launched program in a child session, so
+    # launch-time breakpoints must be applied to that child, not the parent.
+    delegates_launch_to_child: ClassVar[bool] = True
+
+    def _find_node(self) -> str:
+        node = shutil.which("node")
+        if node is None:
+            raise RuntimeError(
+                "node is not on PATH. Install Node.js from https://nodejs.org/ "
+                "and ensure `node` resolves on PATH."
+            )
+        return node
+
+    # ---- adapter process -----------------------------------------------
+
+    def spawn_adapter(self, port: int, *, host: str = "127.0.0.1") -> subprocess.Popen[bytes]:
+        """Spawn ``node dapDebugServer.js <port> <host>`` as the DAP server."""
+        node = self._find_node()
+        dap_server = find_dap_server()
+        kwargs: dict[str, object] = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = windows_no_window_flags()
+        else:
+            kwargs["start_new_session"] = True
+        return subprocess.Popen(  # type: ignore[call-overload,no-any-return]
+            [node, str(dap_server), str(port), host],
+            **kwargs,
+        )
+
+    # ---- launch payload --------------------------------------------------
+
+    def launch_payload(
+        self,
+        *,
+        script: Path,
+        args: list[str] | None,
+        cwd: Path | None,
+        stop_on_entry: bool,
+    ) -> dict[str, Any]:
+        # vscode-js-debug uses the ``pwa-node`` type identifier ("pwa" is a
+        # historical prefix from the debugger's Progressive-Web-App origins;
+        # it's the modern "v2" Node debugger). ``skipFiles`` keeps stop-on-entry
+        # from landing in Node's own internal bootstrap files.
+        payload: dict[str, Any] = {
+            "type": "pwa-node",
+            "request": "launch",
+            "program": str(Path(script).resolve()),
+            "stopOnEntry": stop_on_entry,
+            "console": "internalConsole",
+            "skipFiles": ["<node_internals>/**"],
+        }
+        if args is not None:
+            payload["args"] = args
+        if cwd is not None:
+            payload["cwd"] = str(cwd)
+        return payload
+
+    # ---- listen / IDE attach mode ---------------------------------------
+
+    def supports_listen_mode(self) -> bool:
+        """vscode-js-debug's dapDebugServer.js IS the listen-mode server."""
+        return True
+
+    def spawn_listen_mode(
+        self,
+        *,
+        script: Path,
+        args: list[str],
+        cwd: Path,
+        listen_port: int,
+    ) -> subprocess.Popen[bytes]:
+        # Like the Go adapter: ``dapDebugServer.js`` accepts a DAP launch
+        # request after it starts, so the IDE's own launch config drives
+        # program/args. We use ``script`` / ``args`` only for meta.json.
+        del script, args  # IDE-side launch config takes over
+        node = self._find_node()
+        dap_server = find_dap_server()
+        cmd = [node, str(dap_server), str(listen_port), "127.0.0.1"]
+        kwargs: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "cwd": str(cwd),
+            "close_fds": True,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = windows_no_window_flags()
+        else:
+            kwargs["start_new_session"] = True
+        return subprocess.Popen(cmd, **kwargs)
+
+    def attach_url(self, host: str, port: int) -> str:
+        return f"js-debug://{host}:{port}"
+
+    # ---- traceback parsing ----------------------------------------------
+
+    def parse_traceback(self, text: str) -> ParsedTraceback:
+        return _parse_node_traceback(text)
+
+    # ---- diagnose helpers -----------------------------------------------
+
+    def resolve_launch_target(self, cmd: list[str]) -> tuple[str, list[str]] | None:
+        """Peel ``node [-flags] script.js args`` / ``ts-node script.ts args``.
+
+        Handles common Node CLI flags including the ``-r module`` / ``--require module``
+        pair, which consumes the next argv slot as its module name.
+        """
+        if not cmd:
+            return None
+        if len(cmd) >= 2 and self._is_interpreter(cmd[0]):
+            i = 1
+            while i < len(cmd) and cmd[i].startswith("-"):
+                # ``-r <mod>`` / ``--require <mod>`` consume the next slot too.
+                if cmd[i] in ("-r", "--require") and i + 1 < len(cmd):
+                    i += 2
+                    continue
+                # Args of the form ``--flag=value`` are self-contained.
+                i += 1
+            if i < len(cmd):
+                return cmd[i], list(cmd[i + 1 :])
+            return None
+        return super().resolve_launch_target(cmd)

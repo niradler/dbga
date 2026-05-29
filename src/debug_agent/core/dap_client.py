@@ -4,7 +4,9 @@ Implements the JSON-RPC-style wire format described at
 https://microsoft.github.io/debug-adapter-protocol/ with HTTP-style
 ``Content-Length`` framing. A background reader thread routes incoming
 messages: responses unblock the corresponding ``request`` call, events
-land on a thread-safe queue for callers to consume.
+land on a thread-safe queue for callers to consume, and server-to-client
+("reverse") requests are dispatched to registered handlers — needed for
+vscode-js-debug's ``startDebugging`` child-session pattern.
 """
 
 from __future__ import annotations
@@ -15,9 +17,14 @@ import queue
 import socket
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+# Type for reverse-request handlers: receives ``arguments`` dict, returns the
+# response ``body`` (or ``None`` for no body). Raising returns ``success: false``.
+ReverseHandler = Callable[[dict[str, Any]], dict[str, Any] | None]
 
 
 class DapError(Exception):
@@ -52,6 +59,9 @@ class DapClient:
         # consumed by both _recv_headers (for the next message's headers) and
         # _read_body (for the current message's body).
         self._pushback = b""
+        # Handlers for server-to-client requests (DAP "reverse requests"),
+        # e.g. vscode-js-debug's ``startDebugging``. See ``register_reverse_handler``.
+        self._reverse_handlers: dict[str, ReverseHandler] = {}
 
     # ---- connection lifecycle ------------------------------------------------
 
@@ -206,7 +216,63 @@ class DapClient:
                 pending.event.set()
         elif mtype == "event":
             self._events.put(msg)
-        # Requests from server (e.g. ``runInTerminal``) — not supported; ignore.
+        elif mtype == "request":
+            self._handle_reverse_request(msg)
+
+    # ---- reverse requests (server → client) ---------------------------------
+
+    def register_reverse_handler(self, command: str, handler: ReverseHandler) -> None:
+        """Register a handler for a DAP reverse request (``type: "request"``).
+
+        DAP allows the server to send requests to the client — used by
+        vscode-js-debug to ask us to start a child session
+        (``startDebugging``) and by some adapters for ``runInTerminal``.
+        The handler runs on the reader thread, so it MUST be fast and
+        non-blocking on this connection (opening a NEW socket is fine).
+        """
+        self._reverse_handlers[command] = handler
+
+    def _handle_reverse_request(self, msg: dict[str, Any]) -> None:
+        command = str(msg.get("command", ""))
+        req_seq = int(msg.get("seq", 0))
+        handler = self._reverse_handlers.get(command)
+        if handler is None:
+            # Politely tell the server we don't support this — DAP requires
+            # SOME response or the server may stall waiting for one.
+            self._send_response(req_seq, command, success=False, message="not supported")
+            return
+        try:
+            body = handler(msg.get("arguments") or {})
+        except Exception as exc:  # noqa: BLE001 — reflect any handler failure to the peer
+            self._send_response(
+                req_seq, command, success=False, message=f"{type(exc).__name__}: {exc}"
+            )
+            return
+        self._send_response(req_seq, command, success=True, body=body or {})
+
+    def _send_response(
+        self,
+        request_seq: int,
+        command: str,
+        *,
+        success: bool,
+        body: dict[str, Any] | None = None,
+        message: str = "",
+    ) -> None:
+        """Emit a DAP response frame for a server→client request we just handled."""
+        resp: dict[str, Any] = {
+            "type": "response",
+            "seq": self._next_seq(),
+            "request_seq": request_seq,
+            "command": command,
+            "success": success,
+        }
+        if body is not None:
+            resp["body"] = body
+        if message:
+            resp["message"] = message
+        with contextlib.suppress(DapError):
+            self._send(resp)
 
     # ---- public API ----------------------------------------------------------
 

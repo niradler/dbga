@@ -10,3 +10,7 @@ htmlcov/
 .claude/
 tmp/
 *.bak
+
+# delve (`dlv dap` / `dlv debug`) leaves debug binaries in cwd
+__debug_bin*
+*.test

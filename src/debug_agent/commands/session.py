@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from debug_agent.adapters import get_adapter, list_adapters, resolve_language
 from debug_agent.core import control_proto
 from debug_agent.core.format import emit_error as _emit_error_payload
 from debug_agent.core.format import emit_payload
@@ -111,6 +112,15 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
         help=(
             "Spawn the debuggee in debugpy listen mode for VS Code remote-attach. "
             "Returns attach_url; daemon-controlled session features are disabled."
+        ),
+    )
+    p_start.add_argument(
+        "--lang",
+        choices=list_adapters(),
+        default=None,
+        help=(
+            "Language adapter to use. Defaults to auto-detection from the "
+            "script file extension; falls back to 'python'."
         ),
     )
     p_start.add_argument(
@@ -397,6 +407,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         listen_port=args.listen,
         use_bps_file=bool(args.use_bps_file),
         no_write_bps_file=bool(args.no_write_bps_file),
+        lang=getattr(args, "lang", None),
     )
     if result["status"] == "error":
         _emit_error(args, result["message"], error_type=result.get("error_type", "usage"))
@@ -419,6 +430,7 @@ def start_session_inline(
     listen_port: int | None = None,
     use_bps_file: bool = False,
     no_write_bps_file: bool = False,
+    lang: str | None = None,
 ) -> dict[str, Any]:
     """Start a session (or VS Code listen-mode spawn) without going through argparse.
 
@@ -455,6 +467,18 @@ def start_session_inline(
             "exit_code": 2,
         }
 
+    # Resolve --lang (or auto-detect from extension) up front so listen mode
+    # and the persisted meta.json agree on which adapter we're driving.
+    try:
+        resolved_lang = resolve_language(explicit=lang, script=script_path)
+    except ValueError as exc:
+        return {
+            "status": "error",
+            "error_type": "usage",
+            "message": str(exc),
+            "exit_code": 2,
+        }
+
     if listen_port is not None:
         return _spawn_listen_mode(
             cwd=cwd,
@@ -462,6 +486,7 @@ def start_session_inline(
             script_path=script_path,
             script_args=script_args,
             listen_port=int(listen_port),
+            lang=resolved_lang,
         )
 
     # Optionally merge the shared breakpoints file into the initial set so the
@@ -486,6 +511,7 @@ def start_session_inline(
     sdir.mkdir(parents=True, exist_ok=True)
     meta: dict[str, Any] = {
         "session_id": session_name,
+        "lang": resolved_lang,
         "script": str(script_path),
         "args": script_args,
         "cwd": str(cwd),
@@ -557,50 +583,55 @@ def _spawn_listen_mode(
     script_path: Path,
     script_args: list[str],
     listen_port: int,
+    lang: str,
 ) -> dict[str, Any]:
-    """Spawn ``python -m debugpy --listen --wait-for-client`` and return attach info.
+    """Spawn the language adapter in IDE-attach (listen) mode and return attach info.
 
-    This is the VS Code remote-attach path. We don't connect a DAP client of
-    our own — debugpy in this mode accepts a single client, so giving it to
-    VS Code is the whole point. We block until the port is listening so the
-    caller can start their editor with confidence.
+    This is the VS Code / IDE remote-attach path. We don't connect a DAP
+    client of our own — the language's listen-mode adapter typically accepts
+    a single client, so giving it to the IDE is the whole point. We block
+    until the port is listening so the caller can start their editor with
+    confidence.
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "debugpy",
-        "--listen",
-        f"127.0.0.1:{listen_port}",
-        "--wait-for-client",
-        str(script_path),
-        *script_args,
-    ]
-    kwargs: dict[str, Any] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "cwd": str(cwd),
-        "close_fds": True,
-    }
-    if sys.platform == "win32":
-        kwargs["creationflags"] = windows_no_window_flags()
-    else:
-        kwargs["start_new_session"] = True
-    proc = subprocess.Popen(cmd, **kwargs)
+    adapter = get_adapter(lang)
+    if not adapter.supports_listen_mode():
+        return {
+            "status": "error",
+            "error_type": "unsupported",
+            "message": f"--listen is not supported by the {lang!r} adapter",
+            "exit_code": 2,
+        }
+    try:
+        proc = adapter.spawn_listen_mode(
+            script=script_path,
+            args=script_args,
+            cwd=cwd,
+            listen_port=int(listen_port),
+        )
+    except NotImplementedError as exc:
+        return {
+            "status": "error",
+            "error_type": "unsupported",
+            "message": str(exc),
+            "exit_code": 2,
+        }
 
     if not _wait_port_listening("127.0.0.1", listen_port, timeout=10.0):
         _terminate_daemon(proc.pid)
         return {
             "status": "error",
             "error_type": "daemon_failed",
-            "message": f"debugpy did not start listening on 127.0.0.1:{listen_port}",
+            "message": (
+                f"{lang} listen-mode adapter did not start listening on 127.0.0.1:{listen_port}"
+            ),
             "exit_code": 2,
         }
     payload = {
         "status": "listening",
         "session": session_name,
+        "lang": lang,
         "pid": proc.pid,
-        "attach_url": f"debugpy://127.0.0.1:{listen_port}",
+        "attach_url": adapter.attach_url("127.0.0.1", listen_port),
         "host": "127.0.0.1",
         "port": listen_port,
         "script": str(script_path),

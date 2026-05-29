@@ -131,6 +131,8 @@ debugpy can't step into C extensions (numpy internals, lxml, custom .so). When t
 
 A child process crashes and you can't attach a session to it from the parent. Options:
 
+> **Node caveat — single launched process is the validated path.** For Node/TS the daemon drives one launched process. Worker-thread / `child_process` sub-sessions *do* attach via vscode-js-debug's reverse-attach, but the session currently treats the first `exited` from any sub-process as terminal, so a multi-process run ends when its first child exits. Full multi-process lifecycle is future work — for a child you need to drive, `diagnose` the child's invocation directly (option 1 below).
+
 1. **Run the child under `dbga diagnose`** directly, reproducing its invocation outside the parent.
 2. **Capture the child's stderr** in the parent and `localize` the traceback.
 3. **Instrument the child's entry point** to set up a `breakpoint()` that fires only under a specific env var:

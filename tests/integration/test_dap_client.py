@@ -1,23 +1,24 @@
 """End-to-end DAP client tests against a real debugpy adapter.
 
-Architectural choice (mirrored in ``adapters.debugpy_adapter``): we spawn
-``python -m debugpy.adapter`` as a standalone debug-server, connect to
-it, and drive a normal ``initialize`` / ``launch`` handshake. The
+Architectural choice (mirrored in :mod:`debug_agent.adapters.python`): we
+spawn ``python -m debugpy.adapter`` as a standalone debug-server, connect
+to it, and drive a normal ``initialize`` / ``launch`` handshake. The
 adapter spawns the debuggee itself.
 """
 
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-from debug_agent.adapters import debugpy_adapter
+from debug_agent.adapters import find_free_port, get_adapter, wait_until_listening
 from debug_agent.core.dap_client import DapClient
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "simple_ok.py"
+
+PYTHON_ADAPTER = get_adapter("python")
 
 
 def _stop_adapter(proc: subprocess.Popen[bytes]) -> None:
@@ -32,10 +33,10 @@ def _stop_adapter(proc: subprocess.Popen[bytes]) -> None:
 
 @pytest.mark.integration
 def test_initialize_handshake() -> None:
-    port = debugpy_adapter.find_free_port()
-    proc = debugpy_adapter.spawn_adapter(port)
+    port = find_free_port()
+    proc = PYTHON_ADAPTER.spawn_adapter(port)
     try:
-        sock = debugpy_adapter.wait_until_listening(port, timeout=30.0, proc=proc)
+        sock = wait_until_listening(port, timeout=30.0, proc=proc)
         client = DapClient()
         client.attach_socket(sock)
         try:
@@ -49,10 +50,10 @@ def test_initialize_handshake() -> None:
 
 @pytest.mark.integration
 def test_launch_and_hit_breakpoint() -> None:
-    port = debugpy_adapter.find_free_port()
-    proc = debugpy_adapter.spawn_adapter(port)
+    port = find_free_port()
+    proc = PYTHON_ADAPTER.spawn_adapter(port)
     try:
-        sock = debugpy_adapter.wait_until_listening(port, timeout=30.0, proc=proc)
+        sock = wait_until_listening(port, timeout=30.0, proc=proc)
         client = DapClient()
         client.attach_socket(sock)
         try:
@@ -61,14 +62,12 @@ def test_launch_and_hit_breakpoint() -> None:
             # Fire-and-forget; the `initialized` event drives configuration.
             launch_seq = client.send_request(
                 "launch",
-                {
-                    "type": "python",
-                    "request": "launch",
-                    "program": str(FIXTURE.resolve()),
-                    "console": "internalConsole",
-                    "python": sys.executable,
-                    "stopOnEntry": False,
-                },
+                PYTHON_ADAPTER.launch_payload(
+                    script=FIXTURE,
+                    args=None,
+                    cwd=None,
+                    stop_on_entry=False,
+                ),
             )
             client.wait_for_event("initialized", timeout=10.0)
             client.set_breakpoints(FIXTURE.resolve(), [{"line": 3}])

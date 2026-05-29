@@ -13,14 +13,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from debug_agent.adapters import get_adapter, list_adapters, resolve_language
 from debug_agent.commands.session import start_session_inline
 from debug_agent.core.format import emit_error, emit_payload
 from debug_agent.core.process import run_with_timeout
-from debug_agent.core.tracebacks import (
-    ParsedTraceback,
-    attach_source,
-    parse_traceback,
-)
+from debug_agent.core.tracebacks import ParsedTraceback, attach_source
 
 
 def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -49,6 +46,15 @@ def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser
     )
     p.set_defaults(rerun=True)
     p.add_argument("--session", default="default", help="Session name to use for rerun.")
+    p.add_argument(
+        "--lang",
+        choices=list_adapters(),
+        default=None,
+        help=(
+            "Language adapter for traceback parsing and rerun. Defaults to "
+            "auto-detection from the command (e.g. 'python foo.py' → python)."
+        ),
+    )
     p.add_argument("--cwd", help="Working directory for the command and state.")
     p.add_argument("--text", action="store_true", help="Human-readable output.")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON.")
@@ -65,38 +71,28 @@ def _strip_leading_dashdash(cmd: list[str]) -> list[str]:
     return cmd[1:] if cmd and cmd[0] == "--" else list(cmd)
 
 
-_PYTHON_BASENAMES = {"python", "python3", "py", "python.exe", "python3.exe", "py.exe"}
+def _infer_lang_from_cmd(cmd: list[str]) -> str | None:
+    """Best-effort language inference from a command line.
 
-
-def _is_python_interpreter(arg: str) -> bool:
-    """True if ``arg`` looks like a python interpreter the user invoked the script with."""
-    base = Path(arg).name.lower()
-    return base in _PYTHON_BASENAMES
-
-
-def _resolve_launch_target(cmd: list[str]) -> tuple[str, list[str]] | None:
-    """Pick the script + args debugpy should launch given the user's command.
-
-    For ``python foo.py a b`` we strip the interpreter and launch ``foo.py``
-    with ``[a, b]``. For anything else we trust cmd[0] is the launchable
-    program (e.g. ``pytest``, ``./manage.py``). Returns ``None`` when we
-    can't infer a launchable script (e.g. ``python -m module``) — the
-    caller should fall back to ``--no-rerun`` behavior.
+    Looks first for a known interpreter in ``cmd[0]`` (``python foo.py`` →
+    python). If that fails, falls back to extension detection on the first
+    argument that has a recognised file suffix.
     """
-    if len(cmd) >= 2 and _is_python_interpreter(cmd[0]):
-        # If the user invoked the interpreter with ``-m`` / ``-c``, there's
-        # no script path we can hand to debugpy as ``program``. Bail out and
-        # let the caller report the crash without rerunning.
-        if any(flag in cmd[1:] for flag in ("-m", "-c")):
-            return None
-        # Skip other interpreter flags (``-O``, ``-X``, ``-W``) and use the
-        # first non-flag argument as the script.
-        i = 1
-        while i < len(cmd) and cmd[i].startswith("-"):
-            i += 1
-        if i < len(cmd):
-            return cmd[i], list(cmd[i + 1 :])
-    return cmd[0], list(cmd[1:])
+    from debug_agent.adapters import _REGISTRY, detect_language
+
+    if not cmd:
+        return None
+    base = Path(cmd[0]).name.lower()
+    stripped = base.removesuffix(".exe")
+    for name, cls in _REGISTRY.items():
+        if base in cls.interpreter_basenames or stripped in cls.interpreter_basenames:
+            return name
+    for arg in cmd:
+        if not arg.startswith("-"):
+            detected = detect_language(arg)
+            if detected is not None:
+                return detected
+    return None
 
 
 def cmd_diagnose(args: argparse.Namespace) -> int:
@@ -110,9 +106,22 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         )
 
     cwd = Path(args.cwd).resolve() if args.cwd else Path.cwd().resolve()
+
+    # Resolve the language adapter so traceback parsing and launch-target
+    # detection both speak the same dialect.
+    try:
+        lang = resolve_language(
+            explicit=getattr(args, "lang", None),
+            script=None,
+            default=_infer_lang_from_cmd(cmd) or "python",
+        )
+    except ValueError as exc:
+        return emit_error("usage", str(exc), text=args.text, pretty=args.pretty)
+    adapter = get_adapter(lang)
+
     result = run_with_timeout(cmd, timeout=float(args.timeout), cwd=cwd)
     combined = (result.stdout or "") + (result.stderr or "")
-    parsed = parse_traceback(combined)
+    parsed = adapter.parse_traceback(combined)
     attach_source(parsed, cwd=cwd)
 
     if parsed.deepest_user_frame is None:
@@ -141,7 +150,7 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         emit_payload(payload, text=args.text, pretty=args.pretty)
         return 1
 
-    return _rerun_under_session(args, cmd, cwd, parsed)
+    return _rerun_under_session(args, cmd, cwd, parsed, lang=lang)
 
 
 def _rerun_under_session(
@@ -149,25 +158,24 @@ def _rerun_under_session(
     cmd: list[str],
     cwd: Path,
     parsed: ParsedTraceback,
+    *,
+    lang: str,
 ) -> int:
     assert parsed.deepest_user_frame is not None  # checked by caller
     frame = parsed.deepest_user_frame
     bp_file = Path(frame.file)
     bp_file = (cwd / bp_file).resolve() if not bp_file.is_absolute() else bp_file.resolve()
 
-    # If the user wrote ``python <script> args...`` we want to debug the
-    # script (which is what debugpy launches), not the interpreter binary.
-    # For other commands (e.g. ``pytest tests/``) the entry point IS a Python
-    # script on PATH that debugpy can launch directly.
-    target = _resolve_launch_target(cmd)
+    # The adapter knows how to peel its interpreter (``python foo.py`` →
+    # ``foo.py``). For commands that aren't an interpreter invocation it
+    # returns ``cmd[0]`` as the launchable program (``pytest``, ``./manage.py``).
+    adapter = get_adapter(lang)
+    target = adapter.resolve_launch_target(cmd)
     if target is None:
-        # ``python -m foo`` / ``-c``: we have a real crash but no script
-        # path to rerun under debugpy. Surface the crash and let the caller
-        # rerun manually with an explicit script.
         payload = {
             "status": "crash",
             "traceback": asdict(parsed),
-            "note": "cannot rerun: 'python -m'/'python -c' invocations are unsupported",
+            "note": f"cannot rerun: no launchable script inferred from cmd for {lang!r}",
         }
         emit_payload(payload, text=args.text, pretty=args.pretty)
         return 1
@@ -181,6 +189,7 @@ def _rerun_under_session(
         script_args=script_args,
         breakpoints=breakpoints,
         stop_on_entry=False,
+        lang=lang,
     )
     if start_result["status"] == "error":
         # Emit the structured error directly so the caller sees what blew up.
