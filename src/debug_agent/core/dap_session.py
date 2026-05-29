@@ -11,6 +11,7 @@ continue, repeat".
 from __future__ import annotations
 
 import contextlib
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -56,6 +57,16 @@ class DapSession:
         self._adapter: Adapter = adapter if adapter is not None else get_adapter("python")
         self._state: str = "new"
         self._client: DapClient | None = None
+        # Some DAP servers (notably vscode-js-debug) delegate every launched
+        # program to a CHILD DAP session via a reverse ``startDebugging``
+        # request. We open a fresh TCP connection to the same server for
+        # each child and track them here. ``_active_client`` is the client
+        # that owns the "real" debuggee — defaults to the parent, gets
+        # reassigned to the newest child when startDebugging fires.
+        self._adapter_host: str = "127.0.0.1"
+        self._adapter_port: int = 0
+        self._child_clients: list[DapClient] = []
+        self._active_client: DapClient | None = None
         self._adapter_proc: subprocess.Popen[bytes] | None = None
         self._current_thread_id: int | None = None
         self._output_buffer: list[str] = []
@@ -109,6 +120,7 @@ class DapSession:
         self._listen_port = listen_port
 
         port = find_free_port()
+        self._adapter_port = port
         self._adapter_proc = self._adapter.spawn_adapter(port)
         try:
             sock = wait_until_listening(
@@ -120,6 +132,11 @@ class DapSession:
             client = DapClient()
             client.attach_socket(sock)
             self._client = client
+            self._active_client = client
+            # Adapters that delegate to child sessions (vscode-js-debug)
+            # will send this reverse-request after their initial ``launch``.
+            # Harmless to register for adapters that never send it.
+            client.register_reverse_handler("startDebugging", self._on_start_debugging)
 
             client.initialize()
             launch_payload: dict[str, Any] = self._adapter.launch_payload(
@@ -154,10 +171,19 @@ class DapSession:
         Tree-kills the adapter process group so the debuggee (a child of the
         adapter) is torn down with it. The DAP ``disconnect`` request goes
         first to give the adapter a graceful-shutdown chance; the tree-kill
-        is the unconditional fallback.
+        is the unconditional fallback. Child sessions (vscode-js-debug
+        spawns one per launched program) are disconnected first so they
+        don't leak.
         """
         if self._state == "released":
             return
+        # Tear down child sessions before the parent, so the parent is
+        # still alive to receive their disconnect frames.
+        for child in self._child_clients:
+            with contextlib.suppress(Exception):
+                child.disconnect()
+        self._child_clients = []
+        self._active_client = None
         client = self._client
         self._client = None
         if client is not None:
@@ -181,15 +207,21 @@ class DapSession:
     # ---- stop/resume flow ----------------------------------------------------
 
     def wait_for_stop(self, *, timeout: float = 30.0) -> StoppedContext:
-        """Drain events until ``stopped``, ``terminated``, or ``exited``."""
+        """Drain events until ``stopped``, ``terminated``, or ``exited``.
+
+        Polls the parent client AND any child clients (vscode-js-debug
+        creates one child per launched program). Whichever client emits
+        ``stopped`` becomes the new active client so subsequent
+        ``continue_`` / ``step`` / ``evaluate`` calls route to the right
+        place.
+        """
         if self._state == "released":
             raise RuntimeError("session has been released")
         if self._state == "terminated":
             return self._terminal_context()
         if self._state not in {"running", "stopped"}:
             raise RuntimeError(f"cannot wait_for_stop in state {self._state}")
-        client = self._client
-        if client is None:
+        if self._client is None:
             raise RuntimeError("no DAP client")
 
         deadline = time.monotonic() + timeout
@@ -197,7 +229,7 @@ class DapSession:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise DapError("wait_for_stop", f"timed out after {timeout}s")
-            msg = client.poll_event(timeout=remaining)
+            msg, source = self._poll_any_client(timeout=min(remaining, 0.2))
             if msg is None:
                 continue
             event_name = msg.get("event")
@@ -207,21 +239,54 @@ class DapSession:
                 continue
             if event_name == "stopped":
                 self._current_thread_id = int(body.get("threadId", 0))
+                # The client that emitted ``stopped`` owns the live debuggee
+                # from now on. For multi-process js-debug runs, this might
+                # switch back and forth across child sessions.
+                self._active_client = source
                 reason = str(body.get("reason", ""))
                 self._state = "stopped"
                 return self._build_stopped_context(reason)
             if event_name == "exited":
+                # A child exited. If there are other live children (or the
+                # parent is still doing work), keep waiting — only the LAST
+                # exit ends the session. v1 simplification: treat any exit
+                # as final since dbga targets single-process debug.
                 self._exit_code = int(body.get("exitCode", 0))
                 self._state = "terminated"
-                # Drain any final ``terminated`` event quickly so it doesn't
-                # surprise the next caller — but don't block long.
-                self._drain_terminal_events(client, deadline_extra=0.5)
+                self._drain_terminal_events_all(deadline_extra=0.5)
                 return self._terminal_context()
             if event_name == "terminated":
                 self._state = "terminated"
-                self._drain_terminal_events(client, deadline_extra=0.5)
+                self._drain_terminal_events_all(deadline_extra=0.5)
                 return self._terminal_context()
             # Ignore all other events (thread, module, process, etc.)
+
+    def _poll_any_client(self, *, timeout: float) -> tuple[dict[str, Any] | None, DapClient | None]:
+        """Round-robin poll the parent + every child client for one event.
+
+        Returns ``(msg, client_that_emitted_it)`` or ``(None, None)`` on
+        timeout. Uses small per-client slices to approximate ``select``.
+        """
+        clients = self._live_clients()
+        if not clients:
+            return None, None
+        per_slice = max(0.01, timeout / max(1, len(clients)))
+        for client in clients:
+            msg = client.poll_event(timeout=per_slice)
+            if msg is not None:
+                return msg, client
+        return None, None
+
+    def _live_clients(self) -> list[DapClient]:
+        """Parent + child clients, in poll order (children first — they own the live debuggee)."""
+        out: list[DapClient] = []
+        # Children first so that for vscode-js-debug, the actually-stopping
+        # session's events surface promptly instead of being starved by
+        # bookkeeping events on the parent.
+        out.extend(self._child_clients)
+        if self._client is not None:
+            out.append(self._client)
+        return out
 
     def continue_(self, *, timeout: float = 30.0) -> StoppedContext:
         self._ensure_stopped("continue")
@@ -396,10 +461,62 @@ class DapSession:
             elif event == "exited" and self._exit_code is None:
                 self._exit_code = int(body.get("exitCode", 0))
 
+    def _drain_terminal_events_all(self, *, deadline_extra: float) -> None:
+        """Drain trailing events from the parent and every child connection."""
+        for client in self._live_clients():
+            self._drain_terminal_events(client, deadline_extra=deadline_extra)
+
     def _require_client(self) -> DapClient:
-        if self._client is None:
+        """Return the client owning the live debuggee.
+
+        For adapters that delegate to a child session (vscode-js-debug),
+        this is the most recent child. For everything else it's the parent.
+        """
+        client = self._active_client or self._client
+        if client is None:
             raise RuntimeError("session has no active DAP client")
-        return self._client
+        return client
+
+    def _on_start_debugging(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Handler for vscode-js-debug's ``startDebugging`` reverse-request.
+
+        js-debug routes every launched program through a child DAP session
+        on a fresh TCP connection to the same server. We open that
+        connection, run the standard handshake using the configuration the
+        server gave us, and track the child so the rest of the session
+        machinery sees its events. Returns an empty body (DAP requires a
+        response; the body is unused).
+
+        The handler runs on the parent client's reader thread. It MUST
+        only do I/O against the child connection it opens — never against
+        the parent — or the reader would deadlock waiting for events it
+        also needs to read.
+        """
+        configuration = args.get("configuration") or {}
+        request_type = str(args.get("request") or "launch")
+        if request_type not in {"launch", "attach"}:
+            raise RuntimeError(f"unsupported startDebugging request: {request_type!r}")
+
+        sock = socket.create_connection((self._adapter_host, self._adapter_port), timeout=10.0)
+        child = DapClient()
+        child.attach_socket(sock)
+        # js-debug nests sessions (e.g. parent → worker thread → child_process).
+        # Register the same handler recursively so grandchildren also wire up.
+        child.register_reverse_handler("startDebugging", self._on_start_debugging)
+
+        # Standard DAP handshake on the child. Configuration is whatever the
+        # parent told us to pass; we treat it as opaque and forward verbatim.
+        child.initialize()
+        child_seq = child.send_request(request_type, configuration)
+        child.wait_for_event("initialized", timeout=15.0)
+        child.set_exception_breakpoints([])
+        child.configuration_done()
+        child.wait_response(child_seq, request_type, timeout=15.0)
+
+        self._child_clients.append(child)
+        self._active_client = child
+        # DAP startDebugging response body is unspecified; empty is correct.
+        return {}
 
     def _require_thread_id(self) -> int:
         if self._current_thread_id is None:

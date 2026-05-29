@@ -1,7 +1,7 @@
 # debug-agent
 
 **Evidence-first multi-language debugger CLI for AI agents.**
-Python (via `debugpy`) · Go (via `dlv dap`) · Node.js (via vscode-js-debug, alpha — handshake works, live-session flow gated on DAP reverse-request support).
+Python (via `debugpy`) · Go (via `dlv dap`) · Node.js / TypeScript (via vscode-js-debug).
 
 A stateless command-line interface on top of `debugpy` that returns
 machine-readable, auto-contextualized JSON on every stop: location, source

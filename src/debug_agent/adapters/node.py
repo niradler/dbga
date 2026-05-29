@@ -17,24 +17,20 @@ vscode-js-debug is **not** published to npm. The install hint surfaced by
 https://github.com/microsoft/vscode-js-debug/releases, or to install
 VS Code (which bundles it as a built-in extension).
 
-Status: **alpha**. The handshake (``initialize``) and discovery work; the
-full ``launch``-driven session does NOT yet, because vscode-js-debug
-delegates execution of the launched program to a *child* DAP session via
-a reverse ``startDebugging`` request — and :class:`DapClient` silently
-drops server-to-client requests today (see ``_dispatch``). Promoting
-this adapter to "live debugging works end-to-end" requires teaching
-``DapClient`` + ``DapSession`` to handle reverse requests and spawn /
-multiplex child sessions. The integration test ``test_node_dap_launch_stops``
-is marked ``xfail`` and will start passing automatically once that lands.
+The full launch flow works end-to-end: vscode-js-debug delegates every
+launched program to a child DAP session via a reverse ``startDebugging``
+request, which :class:`DapClient` + :class:`DapSession` now handle
+transparently (each child opens a fresh TCP connection to the same
+``dapDebugServer.js`` and becomes the active session for stops, steps,
+continues, and evaluations).
 
-Caveats (deliberate v1 limitations):
-  * **Reverse-request support pending.** As above — the full launch flow
-    is gated on that work.
+Notes:
   * **TypeScript is supported transparently** when ``ts-node`` / ``tsx`` is
     on PATH and the script imports register hooks — vscode-js-debug follows
     source maps automatically.
-  * **Worker threads / child_process aren't followed** (same reverse-request
-    blocker).
+  * **Worker threads and ``child_process`` children** are also debuggable
+    via the same nested-session mechanism (handler is registered
+    recursively on child clients).
 """
 
 from __future__ import annotations
