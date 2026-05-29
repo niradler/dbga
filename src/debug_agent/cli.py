@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="dbga",
         description="Evidence-first Python debugger CLI for AI agents.",
     )
-    parser.add_argument("--version", action="version", version="0.1.0")
+    parser.add_argument("--version", action="version", version="0.1.1")
     subparsers = parser.add_subparsers(dest="command", required=True)
     run_cmd.add_subparser(subparsers)
     watch_cmd.add_subparser(subparsers)

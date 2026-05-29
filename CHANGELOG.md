@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Launch-time **exception filters are now replayed to the child session** for
+  child-delegating adapters (vscode-js-debug). They were only set on the parent
+  connection, so `--break-on-exception` was silently dropped for Node.
+
 ### Changed
 
 - **`debug-agent` skill relocated** from `skills/debug-agent/` to
@@ -14,6 +20,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code plugin. `npx skills add niradler/dbga --skill debug-agent` still resolves
   it (via the repo-root `.claude-plugin/marketplace.json`); update any manual
   copy path accordingly.
+
+## [0.1.1] — 2026-05-29
+
+Multi-language release. The debugger is no longer Python-only: the DAP
+layer was generalized behind a language-adapter registry, and Go and Node.js
+adapters ship alongside Python.
+
+### Added
+
+- **Multi-language debugging** via a pluggable adapter registry
+  (`debug_agent.adapters`). Three languages supported out of the box:
+  - **Python** (`debugpy`) — unchanged behavior, now the default.
+  - **Go** (`dlv dap`) — new adapter.
+  - **Node.js** (`vscode-js-debug`) — new adapter, with `startDebugging`
+    reverse-request handling for child-session delegation.
+- **`--lang` flag** on multi-language commands (`session start`, `localize`,
+  `diagnose`). When omitted, the language is auto-detected from the script
+  extension (`.py`, `.go`, `.js`/`.ts`).
+
+### Changed
+
+- `DapSession` is now language-agnostic; adapter-specific spawn/launch/
+  traceback logic moved into `adapters/{python,go,node}.py`.
 
 ## [0.1.0] — 2026-05-28
 
