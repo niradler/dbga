@@ -61,9 +61,12 @@ One bad item must not abort the batch. Track success and failure per index and l
 
 ```python
 from dataclasses import dataclass
+from typing import Generic, TypeVar
+
+T = TypeVar("T")
 
 @dataclass
-class BatchResult[T]:
+class BatchResult(Generic[T]):
     succeeded: dict[int, T]
     failed: dict[int, Exception]
 

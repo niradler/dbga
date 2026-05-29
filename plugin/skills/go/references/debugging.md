@@ -36,7 +36,7 @@ alive you get `session_exists` — clear it with `dbga session release` first.
 
 ```sh
 dbga session start --lang go --session go-bug --cwd ./cmd/app \
-  --break-at calc.go:10 --pretty -- go run .
+  --break-at calc.go:10 --pretty -- main.go
 
 dbga session eval --session go-bug --expr "nums"   # → []int len: 3, cap: 3, [10,20,30]
 dbga session eval --session go-bug --expr "total"

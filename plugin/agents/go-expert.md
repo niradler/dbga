@@ -33,8 +33,9 @@ evidence-first debugging loop, use the **`debug-agent` skill** and `dbga`.
    leaks.
 4. Concurrent/fallible paths take `context`; benchmarks for hot paths
    (`go test -bench=. -benchmem`), confirm wins with `pprof`.
-5. Dependency hygiene when touching deps: `go list -u -m all`, `go get -u ./...`,
-   `go mod tidy`, `govulncheck ./...` — then suggest bumps.
+5. Dependency hygiene when touching deps (per `_shared/dependency-hygiene.md`):
+   audit by running `go list -u -m all` and `govulncheck ./...`; then *suggest*
+   (don't auto-run) `go get -u ./...` / `go mod tidy`.
 
 ## When to delegate / escalate
 
@@ -55,8 +56,8 @@ Validate against real use flows and verify the fix at the original fault before 
 For Go, pass `--lang go` and `--cwd <module dir>` (the dir with `go.mod`):
 
 - `dbga diagnose --lang go --cwd <module dir> -- go run .`
-- `dbga session start --lang go --cwd <module dir> --break-at file.go:line -- .`
-  then `dbga session eval --expr "<x>"`
+- `dbga session start --lang go --cwd <module dir> --break-at file.go:line -- main.go`
+  (session takes a `.go` script path, not a package) then `dbga session eval --expr "<x>"`
 
 Concurrency bugs first: `go test -race ./...`, and dump goroutine stacks
 (`SIGQUIT` / `GOTRACEBACK=all`) for deadlocks. Full recipes:

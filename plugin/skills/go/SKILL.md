@@ -36,15 +36,14 @@ index — load the reference for the task at hand.
 
 ## Dependency hygiene (Go)
 
-On setup or when touching deps, audit then suggest bumps:
+On setup or when touching deps, audit (run), then suggest (don't auto-run):
 
 ```sh
-go list -u -m all      # what's outdated
-go get -u ./...        # update
-go mod tidy
-govulncheck ./...      # known vulnerabilities
+go list -u -m all      # audit: what's outdated
+govulncheck ./...      # audit: known vulnerabilities
 ```
 
+Suggest-only (present, let the developer run): `go get -u ./...`, `go mod tidy`.
 See `_shared/dependency-hygiene.md` for the audit-then-suggest discipline.
 
 ## Quality gate (run before declaring done)

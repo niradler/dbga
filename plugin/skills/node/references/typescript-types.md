@@ -42,7 +42,7 @@ const asUserId = (s: string): UserId => s as UserId;
 
 ```typescript
 type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
-type Awaited<T> = T extends Promise<infer U> ? Awaited<U> : T;
+type UnwrapPromise<T> = T extends Promise<infer U> ? UnwrapPromise<U> : T;
 ```
 
 ## Mapped types — transform a shape
