@@ -5,18 +5,25 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from debug_agent.adapters import get_adapter, list_adapters, resolve_language
 from debug_agent.core.format import emit_error, emit_payload
-from debug_agent.core.tracebacks import attach_source, parse_traceback
+from debug_agent.core.tracebacks import attach_source
 
 
 def add_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     p = subparsers.add_parser(
         "localize",
-        help="Parse a Python traceback into structured data.",
+        help="Parse a language traceback / stack trace into structured data.",
     )
     p.add_argument("--file", help="Path to a file containing a traceback.")
     p.add_argument("--stdin", action="store_true", help="Read traceback from stdin.")
     p.add_argument("traceback_text", nargs="?", help="Traceback text as a positional argument.")
+    p.add_argument(
+        "--lang",
+        choices=list_adapters(),
+        default="python",
+        help="Language adapter to parse with (default: python).",
+    )
     p.add_argument(
         "--context-lines",
         type=int,
@@ -52,7 +59,12 @@ def cmd_localize(args: argparse.Namespace) -> int:
     except OSError as exc:
         return emit_error("io_error", str(exc), text=args.text, pretty=args.pretty)
 
-    parsed = parse_traceback(text)
+    try:
+        lang = resolve_language(explicit=args.lang)
+    except ValueError as exc:
+        return emit_error("usage", str(exc), text=args.text, pretty=args.pretty)
+    adapter = get_adapter(lang)
+    parsed = adapter.parse_traceback(text)
     cwd = Path(args.cwd) if args.cwd else None
     attach_source(parsed, context_lines=args.context_lines, cwd=cwd)
 

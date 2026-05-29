@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from debug_agent.adapters import get_adapter
 from debug_agent.core import control_proto
 from debug_agent.core.auto_context import build_context
 from debug_agent.core.dap_client import DapError
@@ -446,9 +447,11 @@ def _handle_restart(state: _SessionState, _args: dict[str, Any]) -> dict[str, An
     with contextlib.suppress(Exception):
         state.session.release()
 
+    # Reuse the existing adapter on restart — same language, same target.
     new_session = DapSession(
         session_id=str(meta.get("session_id", "default")),
         source_context_lines=state.session.source_context_lines,
+        adapter=state.session.adapter,
     )
     script_path = Path(str(meta["script"]))
     cwd_value = meta.get("cwd")
@@ -669,9 +672,19 @@ def main(meta_path: Path) -> int:
             },
         )
 
+        # ``lang`` is written by ``session start`` (auto-detected or --lang).
+        # Older meta.json files from before the multi-language refactor omit
+        # it; default to Python so existing sessions still resume cleanly.
+        lang = str(meta.get("lang") or "python")
+        try:
+            adapter = get_adapter(lang)
+        except ValueError as exc:
+            print(f"unknown language {lang!r}: {exc}", flush=True)
+            return 1
         session = DapSession(
             session_id=str(meta.get("session_id", "default")),
             source_context_lines=int(meta.get("source_context_lines") or 5),
+            adapter=adapter,
         )
         script_path = Path(str(meta["script"]))
         cwd_value = meta.get("cwd")

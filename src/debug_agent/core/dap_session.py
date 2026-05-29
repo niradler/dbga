@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from debug_agent.adapters import debugpy_adapter
+from debug_agent.adapters import find_free_port, get_adapter, wait_until_listening
+from debug_agent.adapters.base import Adapter
 from debug_agent.core.auto_context import build_context, truncate_value
 from debug_agent.core.dap_client import DapClient, DapError
 from debug_agent.core.dap_types import (
@@ -42,9 +42,18 @@ __all__ = [
 
 
 class DapSession:
-    def __init__(self, session_id: str = "default", *, source_context_lines: int = 5) -> None:
+    def __init__(
+        self,
+        session_id: str = "default",
+        *,
+        source_context_lines: int = 5,
+        adapter: Adapter | None = None,
+    ) -> None:
         self.session_id = session_id
         self._source_context_lines = source_context_lines
+        # Default to the Python adapter for backwards compatibility; callers
+        # that target other languages pass an explicit adapter instance.
+        self._adapter: Adapter = adapter if adapter is not None else get_adapter("python")
         self._state: str = "new"
         self._client: DapClient | None = None
         self._adapter_proc: subprocess.Popen[bytes] | None = None
@@ -73,6 +82,10 @@ class DapSession:
     def source_context_lines(self) -> int:
         return self._source_context_lines
 
+    @property
+    def adapter(self) -> Adapter:
+        return self._adapter
+
     def set_source_context_lines(self, value: int) -> None:
         """Override the source-window size used by future stopped contexts."""
         self._source_context_lines = max(0, int(value))
@@ -95,27 +108,26 @@ class DapSession:
         self._state = "starting"
         self._listen_port = listen_port
 
-        port = debugpy_adapter.find_free_port()
-        self._adapter_proc = debugpy_adapter.spawn_adapter(port)
+        port = find_free_port()
+        self._adapter_proc = self._adapter.spawn_adapter(port)
         try:
-            sock = debugpy_adapter.wait_until_listening(port, timeout=30.0, proc=self._adapter_proc)
+            sock = wait_until_listening(
+                port,
+                timeout=30.0,
+                proc=self._adapter_proc,
+                adapter_label=f"{self._adapter.name} DAP adapter",
+            )
             client = DapClient()
             client.attach_socket(sock)
             self._client = client
 
             client.initialize()
-            launch_payload: dict[str, Any] = {
-                "type": "python",
-                "request": "launch",
-                "program": str(Path(script).resolve()),
-                "console": "internalConsole",
-                "python": sys.executable,
-                "stopOnEntry": stop_on_entry,
-            }
-            if args is not None:
-                launch_payload["args"] = args
-            if cwd is not None:
-                launch_payload["cwd"] = str(cwd)
+            launch_payload: dict[str, Any] = self._adapter.launch_payload(
+                script=Path(script),
+                args=args,
+                cwd=cwd,
+                stop_on_entry=stop_on_entry,
+            )
             launch_seq = client.send_request("launch", launch_payload)
 
             client.wait_for_event("initialized", timeout=10.0)
