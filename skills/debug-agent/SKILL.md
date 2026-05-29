@@ -5,7 +5,7 @@ description: Evidence-first debugging for Python, Go, and Node.js/TypeScript —
 
 # Debug — Evidence-First (Python · Go · Node.js)
 
-Use when reading source alone cannot validate your theory and you need observed runtime evidence: a crash, a hang, wrong output, a flaky test, a value that "shouldn't be possible." Reach for this skill *before* you sprinkle prints or guess at fixes.
+Use when reading source alone cannot validate your theory and you need observed runtime evidence: a crash, a hang, wrong output, a flaky test, a value that "shouldn't be possible." Reach for this skill _before_ you sprinkle prints or guess at fixes.
 
 This skill drives `dbga` (version 0.1.0) — a stateless CLI on top of a background daemon that owns one stateful DAP session per name. The same evidence-first workflow spans three languages over DAP: **Python** (debugpy), **Go** (Delve), and **Node.js/TypeScript** (vscode-js-debug). Every execution command returns full auto-context (location + source + locals + stack + recent output + warnings) as structured JSON, so a single call gives you what a print-debugging loop normally costs five round-trips to learn.
 
@@ -13,10 +13,10 @@ This skill drives `dbga` (version 0.1.0) — a stateless CLI on top of a backgro
 
 `--lang {python,go,node}` is accepted by `session start`, `localize`, and `diagnose`. When omitted, the language is auto-detected from the script's file extension.
 
-| `--lang` | Toolchain prerequisite | Install | Auto-detected extensions |
-|----------|------------------------|---------|--------------------------|
-| `python` | debugpy (bundled) | — works out of the box | `.py` |
-| `go`     | Delve (`dlv`) on PATH | `go install github.com/go-delve/delve/cmd/dlv@latest` | `.go` |
+| `--lang` | Toolchain prerequisite           | Install                                                                                                                                                                                               | Auto-detected extensions      |
+| -------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `python` | debugpy (bundled)                | — works out of the box                                                                                                                                                                                | `.py`                         |
+| `go`     | Delve (`dlv`) on PATH            | `go install github.com/go-delve/delve/cmd/dlv@latest`                                                                                                                                                 | `.go`                         |
 | `node`   | `node` on PATH + vscode-js-debug | not on npm — VS Code bundles it; else extract `js-debug-dap-vX.Y.Z.tar.gz` from the [vscode-js-debug releases](https://github.com/microsoft/vscode-js-debug/releases), or set `$DBGA_JS_DEBUG_SERVER` | `.js .mjs .cjs .ts .mts .cts` |
 
 vscode-js-debug discovery order: `$DBGA_JS_DEBUG_SERVER` → VS Code / Cursor / Insiders extension dirs → manual extract at `~/.local/share/js-debug` (POSIX) or `%LOCALAPPDATA%\js-debug` (Windows).
@@ -66,6 +66,7 @@ dbga diagnose --timeout 60 --cwd <dir> -- node buggy.js
 ```
 
 A successful diagnose returns `"status": "diagnosed"` with `error_type`, `message`, and a `deepest_user_frame`, plus a paused rerun session. Examples observed:
+
 - Python: `error_type: "ZeroDivisionError"`, `message: "division by zero"`, deepest frame `average` line 3.
 - Go: `error_type: "panic"`, `message: "runtime error: integer divide by zero"`, deepest frame `main.average` line 10. (File paths are forward-slash even on Windows.)
 - Node: `error_type: "TypeError"`, `message: "Cannot read properties of null (reading 'value')"`, deepest frame `main` line 10. (`node:internal/*` frames are marked `is_user_code: false`.)
@@ -110,6 +111,7 @@ dbga session start --session n --stop-on-entry --pretty -- buggy.js   # reason: 
 ```
 
 **eval runs in the target language.** Same variable, three formattings:
+
 - Python `nums` → `[10, 20, 30]`
 - Go `nums` → `[]int len: 3, cap: 3, [10,20,30]` (Delve, Go syntax)
 - Node `nums` → `(3) [10, 20, 30]` (vscode-js-debug, JS syntax)
@@ -123,13 +125,13 @@ dbga session start --session n --stop-on-entry --pretty -- buggy.js   # reason: 
 
 ## The Mindset
 
-- **Two strikes, rethink.** If two hypotheses fail at the same location, your mental model is wrong. Stop probing — re-read the code, form a *different* theory aimed at a *different* location.
+- **Two strikes, rethink.** If two hypotheses fail at the same location, your mental model is wrong. Stop probing — re-read the code, form a _different_ theory aimed at a _different_ location.
 - **Set breakpoints instead of prints.** When you feel the urge to print, set a breakpoint. You get full context for free; prints give you one value.
-- **Set where the problem *begins*, not where it *manifests*.** An exception at line 80 usually starts upstream. Move the breakpoint earlier until you see the value first go wrong.
-- **Mimic the user journey.** Set breakpoints along the path you *expect* execution to take. If a function you expected to be called isn't, the bug is in the caller — not the function.
-- **Trace causation up the stack.** A wrong value at the deepest frame? Walk up the stack until the frame where the value *first* became wrong — that's the origin, not the symptom.
+- **Set where the problem _begins_, not where it _manifests_.** An exception at line 80 usually starts upstream. Move the breakpoint earlier until you see the value first go wrong.
+- **Mimic the user journey.** Set breakpoints along the path you _expect_ execution to take. If a function you expected to be called isn't, the bug is in the caller — not the function.
+- **Trace causation up the stack.** A wrong value at the deepest frame? Walk up the stack until the frame where the value _first_ became wrong — that's the origin, not the symptom.
 - **Avoid side-effectful eval.** `eval` mutates live state. Stick to read-only expressions unless you're intentionally probing a fix.
-- **Evidence over inference.** A debugger lets you observe what *does* happen, not what *should*. The gap is your bug.
+- **Evidence over inference.** A debugger lets you observe what _does_ happen, not what _should_. The gap is your bug.
 
 ## Verify Your Fix
 
@@ -137,12 +139,8 @@ While paused at the bug, use `session eval --expr "<fix-expression>"` against li
 
 ## Cleanup
 
-Session daemons exit when you call `session release`. A debuggee that finishes on its own does **not** tear the daemon down — always `release` when you're done. One daemon runs per `--session NAME`.
+Always `session release` when done — a debuggee finishing on its own does **not** tear the daemon down. One daemon per `--session NAME`. `dbga sessions ls` lists live daemons under the current `--cwd` and reaps dead-pid zombies (forgotten ones also self-expire via the idle watchdog, ~30 min). State persists in a project-local `.debug-agent/` dir — add it to the project's `.gitignore`.
 
 ## Workflow
 
 The evidence-first loop, what to do at each stop, when to escalate — `references/workflow.md`. Read it before opening a session.
-
-## Related Skills
-
-- `superpowers:systematic-debugging` — the 4-phase debugging discipline this skill plugs into. If you haven't formed a hypothesis yet, start there.
