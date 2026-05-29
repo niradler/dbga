@@ -1,0 +1,8 @@
+panic: runtime error: index out of range [3] with length 3
+
+goroutine 1 [running]:
+main.processItems({0xc000018180, 0x3, 0x3})
+	/home/user/project/main.go:15 +0x9e
+main.main()
+	/home/user/project/main.go:23 +0x68
+exit status 2

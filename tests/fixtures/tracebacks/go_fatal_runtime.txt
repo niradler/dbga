@@ -1,0 +1,15 @@
+fatal error: concurrent map writes
+
+goroutine 7 [running]:
+runtime.throw({0x10b0e80, 0x14})
+	/usr/local/go/src/runtime/panic.go:1047 +0x5d fp=0xc00007cf68 sp=0xc00007cf38 pc=0x4361fd
+runtime.mapassign_faststr(0x10c8a80, 0xc0000180c0, {0x10b3c91, 0x3})
+	/usr/local/go/src/runtime/map_faststr.go:212 +0x3d8 fp=0xc00007cfd0 sp=0xc00007cf68 pc=0x412998
+main.writer(0xc0000180c0)
+	/home/user/project/race.go:18 +0x9e fp=0xc00007cfe0 sp=0xc00007cfd0 pc=0x47b67e
+main.main.func1()
+	/home/user/project/race.go:32 +0x2c
+
+goroutine 1 [chan receive]:
+main.main()
+	/home/user/project/race.go:35 +0x85

@@ -1,6 +1,7 @@
 # debug-agent
 
-**Evidence-first Python debugger CLI for AI agents.**
+**Evidence-first multi-language debugger CLI for AI agents.**
+Python (via `debugpy`) and Go (via `dlv dap`); Node.js (via vscode-js-debug) under development.
 
 A stateless command-line interface on top of `debugpy` that returns
 machine-readable, auto-contextualized JSON on every stop: location, source
@@ -84,7 +85,14 @@ dbga session release
 
 # VS Code collab — attach from your IDE
 dbga session start --listen 5678 --use-bps-file -- script.py
+
+# Debug a Go program — requires `dlv` on PATH (go install github.com/go-delve/delve/cmd/dlv@latest)
+dbga session start --break-at main.go:12 -- main.go
+dbga diagnose --timeout 30 -- go run main.go
 ```
+
+Language is auto-detected from the script extension (`.py` → python, `.go` → go).
+Pass `--lang {python,go}` to force a specific adapter.
 
 Every command supports `--text` for human-readable output and `--pretty` for
 indented JSON. For full flag references: `dbga <cmd> --help`.

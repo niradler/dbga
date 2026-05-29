@@ -11,10 +11,12 @@ from pathlib import Path
 
 from debug_agent.adapters._socket import find_free_port, wait_until_listening
 from debug_agent.adapters.base import Adapter
+from debug_agent.adapters.go import GoAdapter
 from debug_agent.adapters.python import PythonAdapter
 
 __all__ = [
     "Adapter",
+    "GoAdapter",
     "PythonAdapter",
     "detect_language",
     "find_free_port",
@@ -26,6 +28,7 @@ __all__ = [
 
 _REGISTRY: dict[str, type[Adapter]] = {
     PythonAdapter.name: PythonAdapter,
+    GoAdapter.name: GoAdapter,
 }
 
 
