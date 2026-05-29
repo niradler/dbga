@@ -1,7 +1,7 @@
 # debug-agent
 
 **Evidence-first multi-language debugger CLI for AI agents.**
-Python (via `debugpy`) and Go (via `dlv dap`); Node.js (via vscode-js-debug) under development.
+Python (via `debugpy`) · Go (via `dlv dap`) · Node.js (via vscode-js-debug, alpha — handshake works, live-session flow gated on DAP reverse-request support).
 
 A stateless command-line interface on top of `debugpy` that returns
 machine-readable, auto-contextualized JSON on every stop: location, source
@@ -89,10 +89,22 @@ dbga session start --listen 5678 --use-bps-file -- script.py
 # Debug a Go program — requires `dlv` on PATH (go install github.com/go-delve/delve/cmd/dlv@latest)
 dbga session start --break-at main.go:12 -- main.go
 dbga diagnose --timeout 30 -- go run main.go
+
+# Parse a Node.js V8 stack trace (vscode-js-debug install not required for `localize`)
+dbga localize --lang node --file crash.txt
 ```
 
-Language is auto-detected from the script extension (`.py` → python, `.go` → go).
-Pass `--lang {python,go}` to force a specific adapter.
+Language is auto-detected from the script extension (`.py` → python, `.go` → go,
+`.js`/`.mjs`/`.cjs`/`.ts`/`.mts`/`.cts` → node).
+Pass `--lang {python,go,node}` to force a specific adapter.
+
+### Installing language toolchains
+
+| Language | Required tool | Install |
+| --- | --- | --- |
+| Python | `debugpy` (bundled) | `uv tool install dbga` |
+| Go | `dlv` (delve) on PATH | `go install github.com/go-delve/delve/cmd/dlv@latest` |
+| Node.js | `node` + vscode-js-debug bundle | VS Code ships it as a built-in extension; otherwise extract the latest `js-debug-dap-vX.Y.Z.tar.gz` from <https://github.com/microsoft/vscode-js-debug/releases> into `~/.local/share/` (POSIX) or `%LOCALAPPDATA%` (Windows), or point `$DBGA_JS_DEBUG_SERVER` at an explicit `dapDebugServer.js`. |
 
 Every command supports `--text` for human-readable output and `--pretty` for
 indented JSON. For full flag references: `dbga <cmd> --help`.

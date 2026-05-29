@@ -1,0 +1,16 @@
+/home/user/project/main.js:15
+  items.foo.bar;
+            ^
+
+TypeError: Cannot read properties of undefined (reading 'bar')
+    at processItems (/home/user/project/main.js:15:13)
+    at main (/home/user/project/main.js:23:3)
+    at Object.<anonymous> (/home/user/project/main.js:27:1)
+    at Module._compile (node:internal/modules/cjs/loader:1234:14)
+    at Object.Module._extensions..js (node:internal/modules/cjs/loader:1288:10)
+    at Module.load (node:internal/modules/cjs/loader:1088:32)
+    at Function.Module._load (node:internal/modules/cjs/loader:927:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:88:12)
+    at node:internal/main/run_main_module:17:47
+
+Node.js v20.10.0

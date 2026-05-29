@@ -1,0 +1,6 @@
+ReferenceError: undeclared is not defined
+    at /home/user/project/app.js:8:3
+    at Layer.handle [as handle_request] (/home/user/project/node_modules/express/lib/router/layer.js:95:5)
+    at next (/home/user/project/node_modules/express/lib/router/route.js:144:13)
+    at Route.dispatch (/home/user/project/node_modules/express/lib/router/route.js:114:3)
+    at processTicksAndRejections (node:internal/process/task_queues:96:5)
