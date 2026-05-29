@@ -43,6 +43,43 @@ __all__ = [
 ]
 
 
+def open_adapter_connection(
+    adapter: Adapter,
+    *,
+    timeout: float = 30.0,
+    attempts: int = 3,
+) -> tuple[subprocess.Popen[bytes], socket.socket, int]:
+    """Spawn the DAP adapter and connect, retrying past a startup crash.
+
+    debugpy's adapter has a known race on Windows where its ``accept_worker``
+    thread crashes on init under back-to-back launches: the adapter exits
+    (code 0) before it ever listens, and :func:`wait_until_listening` raises
+    ``RuntimeError``. A single transient crash shouldn't sink the session —
+    we tree-kill the dead adapter and respawn on a fresh port, up to
+    ``attempts`` times. Returns ``(proc, sock, port)`` for the live adapter.
+    """
+    last_exc: Exception | None = None
+    for _ in range(max(1, attempts)):
+        port = find_free_port()
+        proc = adapter.spawn_adapter(port)
+        try:
+            sock = wait_until_listening(
+                port,
+                timeout=timeout,
+                proc=proc,
+                adapter_label=f"{adapter.name} DAP adapter",
+            )
+            return proc, sock, port
+        except (RuntimeError, TimeoutError) as exc:
+            # Adapter crashed during startup or never came up — kill the
+            # corpse and try a fresh spawn on a new port.
+            last_exc = exc
+            with contextlib.suppress(Exception):
+                kill_tree(proc.pid)
+    assert last_exc is not None  # loop runs >=1 time, so a failure set this
+    raise last_exc
+
+
 class DapSession:
     def __init__(
         self,
@@ -145,16 +182,13 @@ class DapSession:
         self._state = "starting"
         self._listen_port = listen_port
 
-        port = find_free_port()
-        self._adapter_port = port
-        self._adapter_proc = self._adapter.spawn_adapter(port)
         try:
-            sock = wait_until_listening(
-                port,
-                timeout=30.0,
-                proc=self._adapter_proc,
-                adapter_label=f"{self._adapter.name} DAP adapter",
+            # Spawn + connect with a bounded retry past debugpy's known
+            # adapter-startup race (accept_worker thread-init crash on Windows).
+            self._adapter_proc, sock, port = open_adapter_connection(
+                self._adapter, timeout=30.0, attempts=3
             )
+            self._adapter_port = port
             client = DapClient()
             client.attach_socket(sock)
             self._client = client
