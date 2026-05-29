@@ -1,0 +1,35 @@
+{
+  "skill": "node",
+  "evals": [
+    {
+      "name": "ts-type-error-not-assignable",
+      "prompt": "My TypeScript build fails with `TS2322: Type 'string | undefined' is not assignable to type 'string'` in src/user.ts. How do I fix it properly without using `any`?",
+      "expected_behavior": "Triggers the node skill. Loads references/typescript-types.md. Recommends narrowing (guard / nullish handling) or tightening the type rather than casting to any; references strict-mode discipline.",
+      "grading": [
+        { "text": "loaded the node skill / typescript-types reference", "passed": null, "evidence": "" },
+        { "text": "avoided suggesting `any` as the fix", "passed": null, "evidence": "" },
+        { "text": "proposed narrowing or an explicit type fix", "passed": null, "evidence": "" }
+      ]
+    },
+    {
+      "name": "node-unhandled-rejection-wrong-output",
+      "prompt": "My Node Express endpoint sometimes returns wrong data and I see an UnhandledPromiseRejection in the logs. Find and fix the bug.",
+      "expected_behavior": "Triggers the node skill. Gathers runtime evidence with dbga (diagnose or a session breakpoint) before guessing; loads references/async-patterns.md and/or errors-structure.md; identifies a floating promise / missing await / unwrapped async handler; verifies the fix at the fault.",
+      "grading": [
+        { "text": "ran the real flow / dbga before proposing a fix", "passed": null, "evidence": "" },
+        { "text": "loaded the correct reference (async-patterns or errors-structure)", "passed": null, "evidence": "" },
+        { "text": "identified the missing await / unwrapped async handler", "passed": null, "evidence": "" },
+        { "text": "added no code comments unless asked", "passed": null, "evidence": "" }
+      ]
+    },
+    {
+      "name": "node-deps-stale-on-setup",
+      "prompt": "I just cloned this Node project and ran npm install. Anything I should know before I start adding a feature?",
+      "expected_behavior": "Triggers the node skill. Proactively audits dependencies (npm outdated, npm audit) and suggests bumps without running mutating installs; references dependency-hygiene discipline.",
+      "grading": [
+        { "text": "ran audit commands (npm outdated / npm audit)", "passed": null, "evidence": "" },
+        { "text": "suggested bumps rather than auto-running installs", "passed": null, "evidence": "" }
+      ]
+    }
+  ]
+}
