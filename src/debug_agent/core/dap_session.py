@@ -112,11 +112,13 @@ class DapSession:
         self._clients_lock = threading.Lock()
         self._child_clients: list[DapClient] = []
         self._active_client: DapClient | None = None
-        # Breakpoints requested at launch. For child-delegating adapters
-        # (vscode-js-debug) these can't be set on the parent — the program
-        # runs in a child session — so we stash them here and replay them on
-        # the child during its handshake in ``_on_start_debugging``.
+        # Breakpoints and exception filters requested at launch. For
+        # child-delegating adapters (vscode-js-debug) these can't be set on the
+        # parent — the program runs in a child session — so we stash them here
+        # and replay them on the child during its handshake in
+        # ``_on_start_debugging``.
         self._launch_breakpoints: list[Breakpoint] = []
+        self._exception_filters: list[str] = []
         self._adapter_proc: subprocess.Popen[bytes] | None = None
         self._current_thread_id: int | None = None
         self._output_buffer: list[str] = []
@@ -210,9 +212,11 @@ class DapSession:
 
             client.wait_for_event("initialized", timeout=10.0)
 
-            # Stash launch breakpoints so child-delegating adapters can replay
-            # them on the child connection (see ``_on_start_debugging``).
+            # Stash launch breakpoints and exception filters so child-delegating
+            # adapters can replay them on the child connection (see
+            # ``_on_start_debugging``).
             self._launch_breakpoints = list(breakpoints or [])
+            self._exception_filters = list(exception_filters or [])
             if not self._adapter.delegates_launch_to_child:
                 # Single-connection adapter: set breakpoints on the one client.
                 # DAP setBreakpoints replaces per source, so group by file.
@@ -222,7 +226,7 @@ class DapSession:
                 for file_path, bps in by_file.items():
                     self.set_breakpoints(file_path, bps)
 
-            client.set_exception_breakpoints(exception_filters or [])
+            client.set_exception_breakpoints(self._exception_filters)
             client.configuration_done()
             client.wait_response(launch_seq, "launch", timeout=10.0)
             self._state = "running"
@@ -601,7 +605,10 @@ class DapSession:
                 dap_bps.append(entry)
             with contextlib.suppress(DapError):
                 child.set_breakpoints(file_path, dap_bps)
-        child.set_exception_breakpoints([])
+        # Replay launch-time exception filters on the CHILD for the same reason
+        # as breakpoints — filters set on the parent at launch never bind to the
+        # program, which runs in the child session.
+        child.set_exception_breakpoints(self._exception_filters)
         child.configuration_done()
         child.wait_response(child_seq, request_type, timeout=15.0)
 
