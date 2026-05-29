@@ -2,6 +2,8 @@
 
 This is the canonical loop. Run it in order. If you skip a step, you're guessing.
 
+The loop is language-agnostic — it works the same for Python, Go, and Node/TypeScript. `diagnose` and `session start` auto-detect the language from the command/script, so the only difference you'll notice is that `eval` expressions are in the debuggee's own language (Go expr / JS expr, not Python) and the prerequisites differ (Go needs `dlv` on PATH; Node needs `node` + vscode-js-debug). See `debugger.md`.
+
 ## The Loop
 
 ```
@@ -34,7 +36,7 @@ Output (JSON):
   "duration_ms": 420,
   "timed_out": false,
   "stdout": "...",
-  "stderr": "Traceback (most recent call last):\n  File \"...\", line 17, in main\n    ...\nValueError: bad input",
+  "stderr": "...traceback / error output...",
   "killed_signal": null
 }
 ```
@@ -73,9 +75,9 @@ No hypothesis yet? Bisect: set two breakpoints around the suspect region, run, t
 |---|---|
 | Single suspect point, you can pause | `session set-bp` + `continue` |
 | Loop, only iteration N matters | conditional bp: `--break "f:42:i == 100"` |
-| Long-running run, pausing is costly | `instrument add --kind log` |
-| Non-Python failure (log line, child stderr) | `watch` |
-| You already crashed | `diagnose` (one-shot) |
+| Long-running run, pausing is costly | `instrument add --kind log` (probe code is in the target language) |
+| Failure surfaces only as output (log line, child stderr) | `watch` |
+| You already crashed | `diagnose` (one-shot; `-- go run ...` / `-- node app.js` too) |
 
 See `debugger.md` for session usage, `instrumentation.md` for probes, `log-monitoring.md` for watch.
 

@@ -50,35 +50,24 @@ They now start at the same breakpoints you were using. No "what line was it agai
 ## Listen Mode — Attach from VS Code
 
 ```powershell
-dbga session start --listen 5678 --use-bps-file -- script.py
+dbga session start --listen 5678 --use-bps-file -- script.py        # python (auto)
+dbga session start --listen 5678 --lang go   -- main.go             # go
+dbga session start --listen 5678 --lang node -- app.js              # node
 ```
 
-Response:
+The CLI launches the debuggee under the language's listen-mode adapter and returns; the response carries the host/port and PID you then point VS Code at.
 
-```json
-{
-  "status": "listening",
-  "session_id": "default",
-  "attach_url": "debugpy://127.0.0.1:5678",
-  "pid": 12345,
-  "note": "daemon-controlled session features are disabled; attach from VS Code"
-}
-```
+Each language requires its own adapter for `--listen`:
 
-The CLI launched the debuggee under `debugpy --listen 127.0.0.1:5678 --wait-for-client` — execution is paused before the first user line until VS Code attaches. `attach_url` uses the `debugpy://` scheme as an identifier; in VS Code you pass `host`/`port` directly (see launch config below).
+| Language | Listen-mode adapter | Prerequisite for `--listen` |
+| --- | --- | --- |
+| Python | `debugpy --listen` | bundled `debugpy` |
+| Go | `dlv dap --listen` | `dlv` on PATH |
+| Node/TS | vscode-js-debug DAP server | `node` + vscode-js-debug |
 
-In VS Code, add to `.vscode/launch.json`:
+> **Not yet captured live.** The `--listen` attach flow has not been exercised end-to-end in the live evidence corpus. The prerequisites above are accurate (Go needs `dlv`, Node needs vscode-js-debug), but for the exact response payload, the per-language `attach_url` scheme, and the VS Code `launch.json` attach config, consult your installation rather than relying on a hard-coded example here. Treat what follows as the general shape of the workflow, not a verified transcript.
 
-```json
-{
-  "type": "debugpy",
-  "request": "attach",
-  "name": "Attach to dbga session",
-  "connect": {"host": "127.0.0.1", "port": 5678}
-}
-```
-
-Hit F5 → VS Code attaches, the program resumes (or hits your breakpoints).
+In VS Code, add an **attach** configuration to `.vscode/launch.json` for the matching debug type (`debugpy` for Python, `go` for Go, `node` for Node) pointed at `127.0.0.1` and the port you passed to `--listen`, then hit F5 to attach.
 
 ### Important constraints in listen mode
 
@@ -121,4 +110,4 @@ You used the CLI's strength (scriptable, fast hypothesis testing) to narrow the 
 - **VS Code attaches but immediately disconnects.** Usually a version mismatch between debugpy in your venv and what VS Code's Python extension expects. Confirm: `python -c "import debugpy; print(debugpy.__version__)"` matches the extension's requirements.
 - **`address already in use`.** Another process is on port 5678. Pick a different port (`--listen 5679`) or find the offender with `netstat -ano | findstr :5678` on Windows.
 - **Breakpoints set in CLI not appearing in VS Code.** VS Code doesn't read `.debug-agent/breakpoints.json` natively — you need a sync step. See the handoff example above.
-- **Session declared `listening` but VS Code can't attach.** Listen-mode sessions don't show up in `sessions ls` (no daemon). Check the PID returned in the `start` response (e.g. `Get-Process -Id 12345`) — if it's gone, the debuggee exited before attach. Re-run `session start --listen` and connect promptly.
+- **Listen mode started but VS Code can't attach.** Listen-mode sessions don't show up in `sessions ls` (no daemon). Check the PID returned in the `start` response (e.g. `Get-Process -Id <pid>`) — if it's gone, the debuggee exited before attach. Re-run `session start --listen` and connect promptly.

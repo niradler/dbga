@@ -1,12 +1,26 @@
 # Debugger — `dbga session`
 
-A `session` is a long-lived background debugpy daemon (one per `--session NAME`) that owns a single DAP connection to one Python process. The CLI is stateless: every command opens a localhost TCP control socket to the daemon, sends a length-prefixed JSON request, and prints the JSON response. State (current frame, breakpoints, last stop) lives in the daemon.
+A `session` is a long-lived background daemon (one per `--session NAME`) that owns a single DAP connection to one debuggee process. The CLI is stateless: every command opens a localhost TCP control socket to the daemon, sends a length-prefixed JSON request, and prints the JSON response. State (current frame, breakpoints, last stop) lives in the daemon.
 
-This is the workhorse for any interactive Python debugging: pausing, inspecting, stepping, evaluating, restarting, swapping breakpoints mid-run. Everything else in the skill exists to feed this loop or to handle cases where this loop is too expensive.
+This is the workhorse for any interactive debugging — Python, Go, or Node/TypeScript: pausing, inspecting, stepping, evaluating, restarting, swapping breakpoints mid-run. Everything else in the skill exists to feed this loop or to handle cases where this loop is too expensive.
+
+## Languages and `--lang`
+
+`session start` takes `--lang {python,go,node}`. When omitted, the language is auto-detected from the script's extension (`.py`→python, `.go`→go, `.js`/`.mjs`/`.cjs`/`.ts`/`.mts`/`.cts`→node), falling back to `python`. So `--lang` is usually unnecessary — point at the file and it's inferred.
+
+```powershell
+dbga session start --break-at buggy.py:3 -- buggy.py          # → python (auto)
+dbga session start --break-at buggy.go:10  -- buggy.go        # → go (auto from .go)
+dbga session start --break-at buggy.js:3   -- buggy.js        # → node (auto from .js)
+```
+
+Prerequisites: Python uses the bundled `debugpy`; **Go** needs `dlv` on PATH (`go install github.com/go-delve/delve/cmd/dlv@latest`, drives `dlv dap`); **Node/TS** needs `node` plus vscode-js-debug (VS Code bundles it, or extract the GitHub-release tarball, or set `$DBGA_JS_DEBUG_SERVER`). TypeScript works transparently when `ts-node`/`tsx` is available.
+
+**The session ops below are identical across all three languages** — `inspect`, `eval`, `step`, `continue`, `pause`, breakpoints, `restart`, `release` all behave the same and return the same `StoppedContext` shape. The only language-specific thing is that **`eval` expressions are evaluated in the target language** (Python expr for Python, Go expr for Go, JS expr for Node) — not always Python.
 
 ## Lifecycle
 
-The positional after `--` is the **path to a Python script** (e.g. `script.py`), not a command line. The CLI launches it under debugpy directly — `python -m foo` and `python -c "..."` aren't supported here (use a script file instead).
+The positional after `--` is the **path to a script** (e.g. `script.py`, `main.go`, `app.js`), not a command line. The CLI launches it under the language's adapter directly — interpreter-style invocations like `python -m foo` / `python -c "..."` aren't supported here (use a script file instead).
 
 ```powershell
 # Start (runs through to first breakpoint; pass --stop-on-entry to halt at first line)
@@ -92,7 +106,36 @@ dbga session eval --expr "items[0].name" --frame 2     # frame 2 = caller's call
 
 `--frame N` evaluates in the Nth stack frame (0 = current top). This is how you trace causation upward without leaving the breakpoint.
 
+**Expressions are in the target language.** The examples above are Python. For Go, write Go expressions (`len(items)`, `s.Name`); for Node, write JavaScript (`items.length`, `user.profile.settings`). The adapter (delve / vscode-js-debug) evaluates them in the debuggee's own language.
+
 **Don't call side-effectful methods in `eval`.** `queue.pop()`, `cursor.next()`, `db.commit()` mutate the live program. Stick to reads. The only exception is testing a fix expression — but be aware you're now in a state that wouldn't have happened without the eval.
+
+### Same flow, three languages
+
+The session ops are identical; only the eval syntax and value formatting follow the debuggee's language. Each block below was run live against the matching `buggy.*` program, paused at a breakpoint inside `average`:
+
+```powershell
+# Python (auto from .py) — break inside average()
+dbga session start --session py-demo --break-at buggy.py:3 --pretty -- buggy.py
+dbga session eval --session py-demo --expr "nums"      # {"result":"[10, 20, 30]"}
+dbga session eval --session py-demo --expr "total"     # {"result":"60"}
+dbga session release --session py-demo                 # {"status":"ok"}
+
+# Go (auto from .go; needs dlv on PATH) — Go syntax, Go value formatting
+dbga session start --session go-demo --cwd <dir> --break-at buggy.go:10 --pretty -- buggy.go
+dbga session eval --session go-demo --expr "nums"       # {"result":"[]int len: 3, cap: 3, [10,20,30]"}
+dbga session eval --session go-demo --expr "total"      # {"result":"60"}
+dbga session eval --session go-demo --expr "len(nums)"  # {"result":"3"}
+dbga session release --session go-demo                  # {"status":"ok"}
+
+# Node (auto from .js; needs node + vscode-js-debug) — JS syntax, JS value formatting
+dbga session start --session node-demo --cwd <dir> --break-at buggy.js:3 --pretty -- buggy.js
+dbga session eval --session node-demo --expr "nums"    # {"result":"(3) [10, 20, 30]"}
+dbga session eval --session node-demo --expr "total"   # {"result":"60"}
+dbga session release --session node-demo               # {"status":"ok"}
+```
+
+Note how the *same* `nums` array prints three different ways — `[10, 20, 30]` (Python), `[]int len: 3, cap: 3, [10,20,30]` (Delve), `(3) [10, 20, 30]` (vscode-js-debug) — because the adapter evaluates in the debuggee's own language.
 
 ## Continue, with Surgery
 
