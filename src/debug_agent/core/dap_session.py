@@ -75,6 +75,11 @@ class DapSession:
         self._clients_lock = threading.Lock()
         self._child_clients: list[DapClient] = []
         self._active_client: DapClient | None = None
+        # Breakpoints requested at launch. For child-delegating adapters
+        # (vscode-js-debug) these can't be set on the parent — the program
+        # runs in a child session — so we stash them here and replay them on
+        # the child during its handshake in ``_on_start_debugging``.
+        self._launch_breakpoints: list[Breakpoint] = []
         self._adapter_proc: subprocess.Popen[bytes] | None = None
         self._current_thread_id: int | None = None
         self._output_buffer: list[str] = []
@@ -96,6 +101,19 @@ class DapSession:
     @property
     def client(self) -> DapClient | None:
         return self._client
+
+    @property
+    def active_client(self) -> DapClient | None:
+        """The client owning the live debuggee.
+
+        For single-connection adapters (Python/Go) this is the parent. For
+        adapters that delegate the launched program to a child session
+        (vscode-js-debug), this is the child that last reported ``stopped``.
+        Frame-resolution and inspection MUST use this, not :attr:`client`,
+        or they read an empty/foreign stack from the parent connection.
+        """
+        with self._clients_lock:
+            return self._active_client or self._client
 
     @property
     def source_context_lines(self) -> int:
@@ -158,12 +176,17 @@ class DapSession:
 
             client.wait_for_event("initialized", timeout=10.0)
 
-            # Group breakpoints by file (DAP setBreakpoints replaces per source).
-            by_file: dict[Path, list[Breakpoint]] = {}
-            for bp in breakpoints or []:
-                by_file.setdefault(bp.file.resolve(), []).append(bp)
-            for file_path, bps in by_file.items():
-                self.set_breakpoints(file_path, bps)
+            # Stash launch breakpoints so child-delegating adapters can replay
+            # them on the child connection (see ``_on_start_debugging``).
+            self._launch_breakpoints = list(breakpoints or [])
+            if not self._adapter.delegates_launch_to_child:
+                # Single-connection adapter: set breakpoints on the one client.
+                # DAP setBreakpoints replaces per source, so group by file.
+                by_file: dict[Path, list[Breakpoint]] = {}
+                for bp in self._launch_breakpoints:
+                    by_file.setdefault(bp.file.resolve(), []).append(bp)
+                for file_path, bps in by_file.items():
+                    self.set_breakpoints(file_path, bps)
 
             client.set_exception_breakpoints(exception_filters or [])
             client.configuration_done()
@@ -529,6 +552,21 @@ class DapSession:
         child.initialize()
         child_seq = child.send_request(request_type, configuration)
         child.wait_for_event("initialized", timeout=15.0)
+        # Replay launch-time breakpoints on the CHILD — this is the session
+        # that actually runs the program, so breakpoints set on the parent at
+        # launch never bind. Group by file (DAP setBreakpoints is per-source).
+        by_file: dict[Path, list[Breakpoint]] = {}
+        for bp in self._launch_breakpoints:
+            by_file.setdefault(bp.file.resolve(), []).append(bp)
+        for file_path, bps in by_file.items():
+            dap_bps: list[dict[str, Any]] = []
+            for bp in bps:
+                entry: dict[str, Any] = {"line": bp.line}
+                if bp.condition is not None:
+                    entry["condition"] = bp.condition
+                dap_bps.append(entry)
+            with contextlib.suppress(DapError):
+                child.set_breakpoints(file_path, dap_bps)
         child.set_exception_breakpoints([])
         child.configuration_done()
         child.wait_response(child_seq, request_type, timeout=15.0)

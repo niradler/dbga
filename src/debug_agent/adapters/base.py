@@ -41,6 +41,15 @@ class Adapter(ABC):
     (e.g. ``{"python", "python3"}`` for Python). Used by ``diagnose`` to peel
     ``<interpreter> script args...`` into the launchable ``(script, args)``."""
 
+    delegates_launch_to_child: ClassVar[bool] = False
+    """Whether the DAP server runs the launched program in a separate CHILD
+    session (vscode-js-debug does this via a ``startDebugging`` reverse
+    request). When True, breakpoints requested at launch must be applied to
+    the child connection — not the parent — so ``DapSession`` defers them and
+    replays them during the child handshake. Single-connection adapters
+    (debugpy, dlv dap) leave this False and set breakpoints on the one
+    connection directly."""
+
     # ---- adapter process -----------------------------------------------------
 
     @abstractmethod

@@ -248,6 +248,9 @@ class NodeAdapter(Adapter):
     interpreter_basenames: ClassVar[frozenset[str]] = frozenset(
         {"node", "ts-node", "tsx", "node.exe", "ts-node.exe", "tsx.exe"}
     )
+    # vscode-js-debug runs the launched program in a child session, so
+    # launch-time breakpoints must be applied to that child, not the parent.
+    delegates_launch_to_child: ClassVar[bool] = True
 
     def _find_node(self) -> str:
         node = shutil.which("node")

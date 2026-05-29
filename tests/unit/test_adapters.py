@@ -129,3 +129,14 @@ def test_python_adapter_parses_traceback() -> None:
 def test_probe_template_default_is_passthrough() -> None:
     adapter = get_adapter("python")
     assert adapter.probe_template(kind="log", code="print('x')") == "print('x')"
+
+
+def test_only_node_delegates_launch_to_child() -> None:
+    """Node delegates the launched program to a child session; Python/Go don't.
+
+    Regression guard for the launch-breakpoint routing: ``DapSession`` keys
+    its defer-and-replay-on-child behavior off this flag.
+    """
+    assert get_adapter("node").delegates_launch_to_child is True
+    assert get_adapter("python").delegates_launch_to_child is False
+    assert get_adapter("go").delegates_launch_to_child is False

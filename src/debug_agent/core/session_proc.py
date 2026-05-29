@@ -222,7 +222,10 @@ def _handle_eval(state: _SessionState, args: dict[str, Any]) -> dict[str, Any]:
     # If the caller didn't pin a frame, evaluate in the live top frame so
     # ``locals`` reflect the user's actual current stop (not where we started).
     if frame is None:
-        client = session.client
+        # Use the ACTIVE client (the child session for vscode-js-debug), not
+        # the parent — the stopped thread lives in the active session, so the
+        # parent would return an empty stack and we'd pass no frameId.
+        client = session.active_client
         tid = session.current_thread_id
         if client is not None and tid is not None and session.state == "stopped":
             with contextlib.suppress(DapError):
@@ -511,7 +514,9 @@ _HANDLERS: dict[str, _Handler] = {
 
 def _build_inspect_context(state: _SessionState) -> StoppedContext:
     session = state.session
-    client = session.client
+    # Active client (child for vscode-js-debug), not the parent — the stopped
+    # frame/scope/variables live in the session that actually reported the stop.
+    client = session.active_client
     thread_id = session.current_thread_id
     if client is None or thread_id is None or session.state != "stopped":
         raise RuntimeError(f"session is not stopped (state={session.state})")

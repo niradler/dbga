@@ -189,3 +189,30 @@ def test_response_seq_is_distinct_from_request_seq() -> None:
     finally:
         client._shutdown()
         server_sock.close()
+
+
+def test_dap_session_active_client_defaults_to_parent_then_follows_child() -> None:
+    """``active_client`` is the parent until a child is published, then the child.
+
+    Frame-resolution / inspection route through ``active_client``; this guards
+    the parent-vs-child routing bug where eval read an empty stack from the
+    parent at a vscode-js-debug child-session breakpoint.
+    """
+    from debug_agent.core.dap_session import DapSession
+
+    session = DapSession(session_id="t")
+    # No client yet.
+    assert session.active_client is None
+
+    # Simulate a parent client + a published child (without real sockets).
+    parent = object()
+    child = object()
+    session._client = parent  # type: ignore[assignment]
+    with session._clients_lock:
+        session._active_client = parent  # type: ignore[assignment]
+    assert session.active_client is parent
+
+    with session._clients_lock:
+        session._child_clients.append(child)  # type: ignore[arg-type]
+        session._active_client = child  # type: ignore[assignment]
+    assert session.active_client is child
