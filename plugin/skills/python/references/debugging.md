@@ -1,6 +1,6 @@
 # Python — debugging with `dbga`
 
-Python-specific `dbga` recipes. The full evidence-first loop, mindset, and cross-language details live in the **`debug-agent`** skill and `_shared/evidence-first.md` — this file is only the Python deltas. Confirm the tool first: `dbga --version` (expect 0.1.0). Python needs no extra toolchain (debugpy is bundled); `.py` auto-detects `--lang python`.
+Python-specific `dbga` recipes. The full evidence-first loop, mindset, and cross-language details live in the **`debug-agent`** skill and `_shared/evidence-first.md` — this file is only the Python deltas. Confirm the tool first: `dbga --version` (expect 0.1.1+). Python needs no extra toolchain (debugpy is bundled); `.py` auto-detects `--lang python`.
 
 ## Crash → triage in one call
 

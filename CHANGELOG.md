@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Launch-time **exception filters are now replayed to the child session** for
   child-delegating adapters (vscode-js-debug). They were only set on the parent
   connection, so `--break-on-exception` was silently dropped for Node.
+- **Plugin version and skill version strings aligned to `0.1.1`** (matching the
+  package). `plugin.json` and the `dbga --version` checks in the skills still
+  said `0.1.0`; the `--version` checks now read `0.1.1+` so they don't re-stale.
+- **Go skill `--lang go` rationale documented** — Go targets are usually a
+  package or `go run .` with no `.go` path for extension auto-detect, so unlike
+  Python/Node the flag is genuinely required, not just stylistic.
 
 ### Changed
 

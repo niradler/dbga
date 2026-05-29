@@ -5,7 +5,7 @@ Node-specific recipes for the evidence-first loop. The full discipline lives in 
 ## Prerequisites
 
 ```powershell
-dbga --version            # expect 0.1.0
+dbga --version            # expect 0.1.1+
 node --version            # current LTS
 ```
 

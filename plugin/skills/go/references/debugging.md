@@ -5,7 +5,9 @@ Observe what *does* happen; don't infer from source. The discipline is in
 file is the Go-specific recipe sheet.
 
 Prereq: Delve on PATH — `go install github.com/go-delve/delve/cmd/dlv@latest`.
-Always pass `--lang go` and `--cwd <module dir>` (the dir holding `go.mod`).
+Pass `--lang go` explicitly: Go targets are usually a package or `go run .`
+(no `.go` path for extension auto-detect to key off), so unlike Python/Node
+you can't rely on it. Also pass `--cwd <module dir>` (the dir holding `go.mod`).
 `dbga` returns file paths with forward slashes even on Windows.
 
 ## First move by symptom

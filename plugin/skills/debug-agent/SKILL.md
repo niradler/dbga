@@ -7,7 +7,7 @@ description: Evidence-first debugging for Python, Go, and Node.js/TypeScript —
 
 Use when reading source alone cannot validate your theory and you need observed runtime evidence: a crash, a hang, wrong output, a flaky test, a value that "shouldn't be possible." Reach for this skill _before_ you sprinkle prints or guess at fixes.
 
-This skill drives `dbga` (version 0.1.0) — a stateless CLI on top of a background daemon that owns one stateful DAP session per name. The same evidence-first workflow spans three languages over DAP: **Python** (debugpy), **Go** (Delve), and **Node.js/TypeScript** (vscode-js-debug). Every execution command returns full auto-context (location + source + locals + stack + recent output + warnings) as structured JSON, so a single call gives you what a print-debugging loop normally costs five round-trips to learn.
+This skill drives `dbga` (version 0.1.1) — a stateless CLI on top of a background daemon that owns one stateful DAP session per name. The same evidence-first workflow spans three languages over DAP: **Python** (debugpy), **Go** (Delve), and **Node.js/TypeScript** (vscode-js-debug). Every execution command returns full auto-context (location + source + locals + stack + recent output + warnings) as structured JSON, so a single call gives you what a print-debugging loop normally costs five round-trips to learn.
 
 ## Languages
 
@@ -24,7 +24,7 @@ vscode-js-debug discovery order: `$DBGA_JS_DEBUG_SERVER` → VS Code / Cursor / 
 ## Prerequisites
 
 ```powershell
-dbga --version            # expect 0.1.0
+dbga --version            # expect 0.1.1+
 ```
 
 Python needs nothing extra (debugpy is bundled). Go and Node need their toolchain as listed in the Languages table — install only the ones you'll debug. All commands below assume `dbga` is on PATH.
