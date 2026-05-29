@@ -53,6 +53,8 @@ You have `dbga` — an evidence-first debugger for Python/Go/Node over DAP — a
 
 Validate against real use flows and verify the fix at the original fault before declaring it done.
 
+**On a review/audit task** (no live failure to reproduce): source reasoning is fine, but label each finding `RUNTIME-VERIFIED` vs `INSPECTION-ONLY`, prove or offer a repro for anything reproducible, and separate "breaks today" from "latent under a future/edge runtime." (`_shared/evidence-first.md`)
+
 For Go, pass `--lang go` and `--cwd <module dir>` (the dir with `go.mod`):
 
 - `dbga diagnose --lang go --cwd <module dir> -- go run .`

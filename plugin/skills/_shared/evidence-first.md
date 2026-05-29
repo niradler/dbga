@@ -21,6 +21,29 @@ standard **Evidence-First Debugging** block embedded across the plugin.
 The loop: design → implement → run the real flow → debug with evidence →
 simplify → verify at the fault.
 
+## Two modes: live-failure vs. static review
+
+The discipline above assumes a *live failure to reproduce*. Match the mode to
+the task:
+
+- **Live failure** (crash, hang, wrong output, flaky test): reproduce it with
+  `dbga` first. Source reasoning is a hypothesis until a run confirms it. Verify
+  the fix at the original fault.
+- **Static review / audit / design assessment** (no failing run to point at —
+  "review this for bugs", "is this design sound"): source reasoning is
+  legitimate, but it is *unverified*. So:
+  1. **Label every finding** `RUNTIME-VERIFIED` (you reproduced/observed it) or
+     `INSPECTION-ONLY` (read from source). Never imply verification you didn't do.
+  2. **Prove or offer the repro.** If a finding can be shown with a failing test
+     or a `dbga` run, do it — or explicitly offer it. A bug you could have run
+     but didn't is INSPECTION-ONLY at best.
+  3. **Separate "breaks today" from "latent."** Rank by what fails under the
+     runtime in use now vs. only under a future/edge runtime (e.g. free-threaded
+     CPython). Don't inflate severity for the theoretical.
+
+A confident, well-formatted INSPECTION-ONLY finding is the most dangerous output
+you produce — it reads as fact. The label and the repro offer keep it honest.
+
 ## Standard Evidence-First Debugging block
 
 Embed this (verbatim or trimmed) in agents and skill bodies:
@@ -38,7 +61,11 @@ or you need live runtime state, DO NOT guess from source. Gather evidence:
 - Invoke the `debug-agent` skill for the full evidence-first loop.
 
 Validate against real use flows and verify the fix at the original fault
-before declaring it done.
+before declaring it done. On a **review/audit** task (no live failure to
+reproduce), source reasoning is fine but unverified: label each finding
+RUNTIME-VERIFIED vs INSPECTION-ONLY, prove or offer a repro for anything
+reproducible, and separate "breaks today" from "latent under a future/edge
+runtime."
 ```
 
 ## Mindset (cross-language)
