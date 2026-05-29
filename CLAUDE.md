@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `dbga` (distribution) / `debug_agent` (import name) — an evidence-first **Python** debugger CLI built on top of `debugpy`/DAP. The CLI surface is stateless; a per-session background daemon owns the live DAP connection. Every stop returns auto-contextualized JSON (location, source window, locals, full stack, recent output, warnings) so an AI agent can drive a real debugger one command at a time.
 
-Status: alpha. Python-only by design today — `debugpy` and `"type": "python"` are hardcoded in the launch path.
+Status: alpha. Multi-language over DAP via the `adapters/` registry: **Python** (debugpy, the most-validated path), **Go** (Delve), and **Node/TypeScript** (vscode-js-debug). Python is the richest surface — `instrument` source probes are Python-centric and the Node multi-process lifecycle is not yet validated (see the `debug-agent` skill's "Honest Limits"). Adding a language means subclassing `adapters.base.Adapter` and registering it.
 
 ## Commands
 
