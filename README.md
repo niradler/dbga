@@ -3,8 +3,8 @@
 **Evidence-first multi-language debugger CLI for AI agents.**
 Python (via `debugpy`) · Go (via `dlv dap`) · Node.js / TypeScript (via vscode-js-debug).
 
-A stateless command-line interface on top of `debugpy` that returns
-machine-readable, auto-contextualized JSON on every stop: location, source
+A stateless command-line interface on top of the Debug Adapter Protocol that
+returns machine-readable, auto-contextualized JSON on every stop: location, source
 around the stop, locals, full stack, recent output, and warnings — all in a
 single response. Designed so an AI coding agent (or a human at a terminal)
 can drive a real debugger in the same way it edits files: one command, one
@@ -120,7 +120,8 @@ indented JSON. For full flag references: `dbga <cmd> --help`.
                      │
                      │ Debug Adapter Protocol (TCP)
                      ▼
-              debugpy adapter ── attaches to ─── debuggee
+             <lang> DAP adapter ── attaches to ─── debuggee
+        (debugpy · Delve · vscode-js-debug)
 ```
 
 The daemon owns the live DAP connection, breakpoint state, current frame, and
