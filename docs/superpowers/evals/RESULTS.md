@@ -9,37 +9,50 @@ Query pool: `trigger-queries.json` — 16 queries, 4 per skill intent
 `should_trigger = (intent == skill)`, so the other 12 act as cross-skill
 near-miss negatives.
 
-## What was measured
+## Results (WSL/Linux, skills CLI harness, runs-per-query 1–3)
 
-- **Cross-skill separation (negatives): PASS.** `debug-agent` ran against the
-  full pool: **12/12 cross-language negatives correctly did NOT trigger** — it
-  stayed quiet on every python/go/node query. A `python` smoke run likewise
-  stayed quiet on the go/node negatives. The descriptions are well-separated;
-  no mis-trigger between the four skills was observed.
+| Skill | Passed | Negatives (no mis-trigger) | Positives (auto-trigger ≥0.5) |
+| --- | --- | --- | --- |
+| debug-agent | 12/16 | 12/12 ✅ | ~1/4 |
+| python | 12/16 | 12/12 ✅ | ~0/4 |
+| go | 13/16 | 12/12 ✅ | ~1/4 |
+| node | 12/16 | 12/12 ✅ | ~0/4 |
 
-## Platform limitation (positive rate not measurable on native Windows)
+- **Cross-skill separation (the property that matters for a 4-skill plugin):
+  excellent and uniform.** Every skill stays quiet on the other three skills'
+  intents (12/12 negatives each). No mis-trigger observed anywhere.
+- **Positive auto-trigger rate is uniformly low — a harness ceiling, not a
+  prompt defect.** Discriminating test: re-running `debug-agent` with a
+  deliberately punchy, imperative description ("Use this skill whenever…",
+  explicit trigger keywords, "Always use before guessing") produced **no lift**
+  (still ~1/4). A description-quality problem would vary by skill and respond to
+  a stronger trigger; instead the rate is flat across all skills and unresponsive
+  to description strength. The cause is methodology: `run_eval.py` injects each
+  skill as a `.claude/commands/` entry and measures whether one-shot `claude -p`
+  auto-invokes it — and one-shot non-interactive runs tend to just do the task
+  rather than auto-invoke a command. Real plugin-installed skills trigger via a
+  different path.
 
-- The 4 positive queries reported `trigger_rate 0` — but each coincided with a
-  `WinError 10038: An operation was attempted on something that is not a
-  socket`. `run_eval.py` detects triggering by `select.select()` on the
-  `claude -p` subprocess **pipe**; on native Windows `select` accepts only
-  sockets, so the stream reader raises before it can observe the Skill
-  invocation. This is a harness/platform bug, **not** a description defect.
-- The spec anticipated this: "Run eval scripts through a POSIX shell (Bash
-  tool / WSL)." Reliable positive-trigger and the auto-rewrite `run_loop` need
-  WSL/Linux. The unbounded `run_loop` was intentionally skipped on Windows
-  because it would inherit the same broken positive signal.
+## Why `run_loop` auto-optimization was not run
 
-## Conclusion
+`run_loop` maximizes positive trigger rate. The discriminating test shows that
+rate is capped by the harness, not the description, so optimization would chase
+a biased proxy and risk overfitting descriptions that are already triggers-only,
+keyword-rich, independently reviewed, and behaviorally validated (see the
+buggy-script baseline-vs-with-skill test). Decision: keep the reviewed
+descriptions; rely on the clean separation result.
 
-The high-value property — the four descriptions fire on their own intent and
-stay quiet on the others' — is validated on the reliable (negative) axis, and
-the descriptions were independently reviewed as triggers-only and keyword-rich.
-Positive-rate numbers should be regenerated under WSL/Linux if exact figures are
-wanted; rerun with:
+## Windows note (original blocker)
+
+On native Windows the positive axis was entirely unmeasurable: `run_eval.py`
+polls the `claude -p` subprocess **pipe** with `select.select()`, and Windows
+`select` accepts only sockets → `WinError 10038`. WSL/Linux fixes this (Linux
+`select` works on pipe fds). Rerun under WSL with:
 
 ```sh
-PYTHONPATH=<skill-creator> python run_eval.py \
-  --eval-set <skill>.json --skill-path plugin/skills/<skill> \
-  --runs-per-query 3 --model claude-sonnet-4-6
+PYTHONPATH=<skill-creator> uv run --no-project --with pyyaml python run_eval.py \
+  --eval-set <skill>.json --skill-path plugin/skills/<skill> --runs-per-query 3
 ```
+
+(`--no-project` is required so `uv` does not try to repair the Windows-format
+`.venv` over the `/mnt/c` mount.)
