@@ -1,0 +1,21 @@
+[
+  { "query": "Add type hints to this module and get it passing mypy --strict", "intent": "python" },
+  { "query": "Write a Pythonic async FastAPI endpoint that fetches rows from Postgres", "intent": "python" },
+  { "query": "My .py script raises AttributeError on a None value, refactor it cleanly", "intent": "python" },
+  { "query": "Make this asyncio code stop blocking the event loop", "intent": "python" },
+
+  { "query": "I have a data race detected by go test -race in my worker pool", "intent": "go" },
+  { "query": "Wrap these errors with %w and check them with errors.Is in my Go service", "intent": "go" },
+  { "query": "My goroutines deadlock: all goroutines are asleep - deadlock", "intent": "go" },
+  { "query": "Use functional options for this Go struct constructor", "intent": "go" },
+
+  { "query": "Fix this TypeScript TS2345 error, the argument is not assignable", "intent": "node" },
+  { "query": "My Express handler has an unhandled promise rejection, make it robust", "intent": "node" },
+  { "query": "Write an advanced conditional type that unwraps a Promise in TypeScript", "intent": "node" },
+  { "query": "Cannot read properties of undefined in my Node EventEmitter code", "intent": "node" },
+
+  { "query": "My program crashes with a traceback and I want to triage it to the failing frame", "intent": "debug-agent" },
+  { "query": "Pause my script at a breakpoint and inspect the live value of a variable", "intent": "debug-agent" },
+  { "query": "The process hangs and I need to see live runtime state, not guess from source", "intent": "debug-agent" },
+  { "query": "Set a breakpoint and step to find where this value first goes wrong", "intent": "debug-agent" }
+]

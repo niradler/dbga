@@ -1,0 +1,36 @@
+{
+  "skill": "go",
+  "evals": [
+    {
+      "name": "race-in-worker-pool",
+      "prompt": "My Go worker pool intermittently fails with 'WARNING: DATA RACE' on a shared results map. Find and fix the race.",
+      "expected_behavior": "Loads go/references/concurrency.md (and debugging.md). Runs `go test -race ./...` to observe the race before changing code. Fixes by guarding the map with a sync.Mutex/RWMutex or routing results through a channel rather than a shared map. Adds no explanatory code comments. Re-runs the race detector to confirm it is clean.",
+      "grading": [
+        { "text": "Ran `go test -race` (or `go run -race`) to gather evidence before proposing a fix", "passed": null, "evidence": "" },
+        { "text": "Loaded the correct reference file (concurrency.md / debugging.md)", "passed": null, "evidence": "" },
+        { "text": "Fixed the race with a mutex or channel, not time.Sleep", "passed": null, "evidence": "" },
+        { "text": "Added no code comments unless asked", "passed": null, "evidence": "" }
+      ]
+    },
+    {
+      "name": "error-wrapping-inspection",
+      "prompt": "This Go service compares errors with `err == ErrNotFound` but the check never matches even when the underlying error is ErrNotFound after the repository wraps it. Fix it idiomatically.",
+      "expected_behavior": "Loads go/references/errors-structure.md. Identifies that wrapping with %w breaks == comparison and switches the check to errors.Is(err, ErrNotFound) (or errors.As for typed errors), ensuring the wrap uses %w. Explicit error handling, no string matching on err.Error().",
+      "grading": [
+        { "text": "Used errors.Is / errors.As instead of == or string matching", "passed": null, "evidence": "" },
+        { "text": "Ensured the error is wrapped with %w to preserve the chain", "passed": null, "evidence": "" },
+        { "text": "Loaded go/references/errors-structure.md", "passed": null, "evidence": "" }
+      ]
+    },
+    {
+      "name": "panic-triage",
+      "prompt": "Running `go run .` in ./cmd/app panics with 'runtime error: integer divide by zero'. Find where it originates and fix it.",
+      "expected_behavior": "Reaches for the debug-agent toolkit: `dbga diagnose --lang go --cwd ./cmd/app -- go run .` to triage to the deepest user frame, inspects live state, fixes the divide-by-zero guard at the origin, then re-runs the real flow to verify the panic is gone at the original fault.",
+      "grading": [
+        { "text": "Used dbga diagnose/session with --lang go and --cwd before guessing", "passed": null, "evidence": "" },
+        { "text": "Fixed the bug at the originating frame, not the manifestation", "passed": null, "evidence": "" },
+        { "text": "Verified by re-running the real flow", "passed": null, "evidence": "" }
+      ]
+    }
+  ]
+}

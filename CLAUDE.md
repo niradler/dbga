@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `dbga` (distribution) / `debug_agent` (import name) — an evidence-first **Python** debugger CLI built on top of `debugpy`/DAP. The CLI surface is stateless; a per-session background daemon owns the live DAP connection. Every stop returns auto-contextualized JSON (location, source window, locals, full stack, recent output, warnings) so an AI agent can drive a real debugger one command at a time.
 
-Status: alpha. Python-only by design today — `debugpy` and `"type": "python"` are hardcoded in the launch path.
+Status: alpha. Multi-language over DAP via the `adapters/` registry: **Python** (debugpy, the most-validated path), **Go** (Delve), and **Node/TypeScript** (vscode-js-debug). Python is the richest surface — `instrument` source probes are Python-centric and the Node multi-process lifecycle is not yet validated (see the `debug-agent` skill's "Honest Limits"). Adding a language means subclassing `adapters.base.Adapter` and registering it.
 
 ## Commands
 
@@ -72,6 +72,6 @@ Every CLI command returns a single JSON object on stdout via `core/format.emit_p
 - **Tear-down is best-effort and idempotent.** `DapSession.release()` is called from `finally`. Tree-killing the adapter is the unconditional fallback after a graceful `disconnect` request.
 - **The daemon idle-timeout watchdog** (default 1800s) exists so a forgotten session can't linger forever — don't disable it without thinking about cleanup.
 
-## The skill (`skills/debug-agent/`)
+## The skill (`plugin/skills/debug-agent/`)
 
-A Claude/agent skill ships in-repo at `skills/debug-agent/`. It documents the evidence-first workflow that the CLI is designed for (`SKILL.md` + `references/*.md`). If you change CLI command shapes or JSON schemas, audit the skill — it has concrete command examples that go stale silently.
+A Claude/agent skill ships in-repo at `plugin/skills/debug-agent/` (part of the `debug-agent` Claude Code plugin under `plugin/`). It documents the evidence-first workflow that the CLI is designed for (`SKILL.md` + `references/*.md`). If you change CLI command shapes or JSON schemas, audit the skill — it has concrete command examples that go stale silently.

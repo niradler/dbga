@@ -1,0 +1,8 @@
+{
+  "name": "dbga",
+  "description": "Evidence-first debugging (Python/Go/Node over DAP) plus consolidated language skills and an architect for clean, verified code.",
+  "owner": { "name": "Nir Adler" },
+  "plugins": [
+    { "name": "debug-agent", "source": "./plugin" }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "skill": "python",
+  "evals": [
+    {
+      "name": "zerodivision-triage",
+      "prompt": "Running `python report.py` crashes with ZeroDivisionError: division by zero somewhere in an average calculation. Find where it originates and fix it.",
+      "expected_behavior": "Reaches for the debug-agent toolkit: `dbga diagnose --timeout 30 -- python report.py` to triage to the deepest user frame, inspects the live values that produced the error, fixes the guard at the originating frame (empty/zero divisor), then re-runs the real flow to verify the crash is gone at the original fault. Adds no explanatory code comments.",
+      "grading": [
+        { "text": "Used dbga diagnose (or session start --break-at) to gather runtime evidence before proposing a fix", "passed": null, "evidence": "" },
+        { "text": "Fixed the bug at the originating frame, not where it manifested", "passed": null, "evidence": "" },
+        { "text": "Verified by re-running the real flow / eval at the original fault", "passed": null, "evidence": "" },
+        { "text": "Added no code comments unless asked", "passed": null, "evidence": "" }
+      ]
+    },
+    {
+      "name": "blocking-in-async",
+      "prompt": "My asyncio service is supposed to fetch 20 URLs concurrently but it runs them one at a time and the whole loop freezes. Make it actually concurrent.",
+      "expected_behavior": "Loads python/references/async-concurrency.md. Identifies blocking calls inside async def (time.sleep / requests.get) stalling the event loop, switches to async-native I/O (httpx.AsyncClient) with asyncio.gather, and bounds concurrency with a Semaphore where appropriate. For unavoidable sync work, wraps it in asyncio.to_thread. No blocking calls remain in coroutines; no explanatory comments added.",
+      "grading": [
+        { "text": "Loaded python/references/async-concurrency.md", "passed": null, "evidence": "" },
+        { "text": "Replaced blocking calls with async-native I/O or asyncio.to_thread", "passed": null, "evidence": "" },
+        { "text": "Used asyncio.gather / TaskGroup for concurrency", "passed": null, "evidence": "" },
+        { "text": "Added no code comments unless asked", "passed": null, "evidence": "" }
+      ]
+    },
+    {
+      "name": "type-safe-repository",
+      "prompt": "Add full type hints to this Python data-access layer so it passes mypy --strict, including a generic repository interface and a Protocol for the injected cache.",
+      "expected_behavior": "Loads python/references/type-hints.md. Adds complete annotations using 3.10+ syntax (X | None, list[...]), defines a Generic[T, ID] repository ABC and a Protocol for the cache dependency, parameterizes all collections, and avoids Any. Result is mypy --strict clean. Suggests a mypy strict config if absent. No unrelated refactors, no stray comments.",
+      "grading": [
+        { "text": "Loaded python/references/type-hints.md", "passed": null, "evidence": "" },
+        { "text": "Used modern 3.10+ typing (X | None, list[...]) and parameterized collections", "passed": null, "evidence": "" },
+        { "text": "Used Protocol for the injected dependency and Generic for the repository", "passed": null, "evidence": "" },
+        { "text": "Added no code comments unless asked", "passed": null, "evidence": "" }
+      ]
+    }
+  ]
+}

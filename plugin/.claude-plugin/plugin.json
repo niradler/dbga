@@ -1,0 +1,9 @@
+{
+  "name": "debug-agent",
+  "description": "Evidence-first debugging (Python/Go/Node over DAP) plus consolidated language skills and an architect to deliver clean, verified code.",
+  "version": "0.1.0",
+  "author": { "name": "Nir Adler" },
+  "homepage": "https://github.com/niradler/dbga",
+  "repository": "https://github.com/niradler/dbga",
+  "license": "MIT"
+}
