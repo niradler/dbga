@@ -72,6 +72,6 @@ Every CLI command returns a single JSON object on stdout via `core/format.emit_p
 - **Tear-down is best-effort and idempotent.** `DapSession.release()` is called from `finally`. Tree-killing the adapter is the unconditional fallback after a graceful `disconnect` request.
 - **The daemon idle-timeout watchdog** (default 1800s) exists so a forgotten session can't linger forever — don't disable it without thinking about cleanup.
 
-## The skill (`skills/debug-agent/`)
+## The skill (`plugin/skills/debug-agent/`)
 
-A Claude/agent skill ships in-repo at `skills/debug-agent/`. It documents the evidence-first workflow that the CLI is designed for (`SKILL.md` + `references/*.md`). If you change CLI command shapes or JSON schemas, audit the skill — it has concrete command examples that go stale silently.
+A Claude/agent skill ships in-repo at `plugin/skills/debug-agent/` (part of the `debug-agent` Claude Code plugin under `plugin/`). It documents the evidence-first workflow that the CLI is designed for (`SKILL.md` + `references/*.md`). If you change CLI command shapes or JSON schemas, audit the skill — it has concrete command examples that go stale silently.

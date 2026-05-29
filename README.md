@@ -145,8 +145,9 @@ they belong next to the code. Add `.debug-agent/` to your `.gitignore`:
 
 ## The `debug-agent` Skill
 
-`skills/debug-agent/` contains a Claude / agent skill that teaches
-evidence-first debugging on top of `dbga`. It includes:
+`plugin/skills/debug-agent/` contains a Claude / agent skill that teaches
+evidence-first debugging on top of `dbga`. It ships inside the `debug-agent`
+Claude Code plugin (see [`plugin/README.md`](plugin/README.md)) and includes:
 
 - **`SKILL.md`** — when to trigger, decision tree, mindset
 - **`references/workflow.md`** — the evidence-first loop
@@ -175,11 +176,15 @@ Manual install also works:
 
 ```sh
 # Linux / macOS
-cp -r skills/debug-agent ~/.claude/skills/
+cp -r plugin/skills/debug-agent ~/.claude/skills/
 
 # Windows PowerShell
-Copy-Item -Recurse skills/debug-agent $env:USERPROFILE\.claude\skills\
+Copy-Item -Recurse plugin/skills/debug-agent $env:USERPROFILE\.claude\skills\
 ```
+
+> Installing the full plugin (`/plugin install debug-agent@dbga`) brings this
+> skill plus the `python`/`go`/`node` skills and the agents — see
+> [`plugin/README.md`](plugin/README.md).
 
 ## Development
 

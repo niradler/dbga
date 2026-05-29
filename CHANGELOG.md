@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`debug-agent` skill relocated** from `skills/debug-agent/` to
+  `plugin/skills/debug-agent/` as part of packaging the `debug-agent` Claude
+  Code plugin. `npx skills add niradler/dbga --skill debug-agent` still resolves
+  it (via the repo-root `.claude-plugin/marketplace.json`); update any manual
+  copy path accordingly.
+
 ## [0.1.0] — 2026-05-28
 
 Initial alpha release of `debug-agent` (CLI: `dbga`) — an evidence-first
@@ -57,7 +65,7 @@ daemon, with auto-context returned on every stop.
   (truncated to 200-char strings / 5-item collection previews), full stack
   (capped at 20 frames), recent output, warnings. No follow-up calls
   needed. Configurable via `--context-lines`.
-- **`debug-agent` skill** (`skills/debug-agent/`) — Claude/agent
+- **`debug-agent` skill** (`plugin/skills/debug-agent/`) — Claude/agent
   skill that drives `dbga` with evidence-first workflow, log
   monitoring, localization, instrumentation, debugger, VS Code collab, and
   advanced (hang/deadlock/wolf-fence/concurrency) reference docs.
