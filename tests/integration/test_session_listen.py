@@ -6,10 +6,11 @@ import shutil
 import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
+
+from debug_agent.core.state import is_pid_alive
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -18,17 +19,6 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
-
-
-def _port_listening(host: str, port: int, *, timeout: float) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=0.5):
-                return True
-        except OSError:
-            time.sleep(0.1)
-    return False
 
 
 def _cli(*args: str, cwd: Path, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
@@ -64,11 +54,14 @@ def test_session_start_listen_returns_attach_url(tmp_path: Path) -> None:
         assert payload["attach_url"] == f"debugpy://127.0.0.1:{port}"
         assert payload["port"] == port
         proc_pid = int(payload["pid"])
-        # The CLI returns ``status: listening`` only once the port is actually
-        # accepting connections — verify the contract by reconnecting. Empty
-        # TCP probes don't consume debugpy's single-client slot (it's looking
-        # for a DAP handshake), so this is safe to do.
-        assert _port_listening("127.0.0.1", port, timeout=5.0)
+        # Don't re-probe the port here: ``_spawn_listen_mode`` already gates
+        # ``status: listening`` on the port accepting (it waits up to 10s), so
+        # a second connect is redundant — and racy, because debugpy
+        # ``--wait-for-client`` accepts a single client and a throwaway TCP
+        # probe can perturb the listener (the source of an intermittent CI
+        # failure). Assert the listener process is alive instead; that plus the
+        # contract fields above verifies a usable attach endpoint was returned.
+        assert is_pid_alive(proc_pid)
     finally:
         if proc_pid:
             # In listen mode there's no daemon to ``session release`` against —
