@@ -69,9 +69,18 @@ the `skills` CLI at `plugin/skills/`, so no `--full-depth` flag is needed.
 - **Develop in one language:** the matching skill (`python`/`go`/`node`) loads
   language-specific references on demand.
 - **Orchestrate:** run `claude --agent debug-agent:architect` to let the
-  architect gather evidence and delegate to the language experts. See
+  architect gather evidence and delegate to the language experts. Delegation
+  works **only when the architect is the main agent** — dispatched as a subagent
+  it cannot spawn experts and works solo. See
   [`references/agent-teams.md`](references/agent-teams.md) for the experimental
   parallel-debugging mode.
+- **Hard single-language task:** the experts default to **sonnet**; for a gnarly
+  type-level, concurrency, or panic-trace problem, request an **opus** override
+  at dispatch.
+- **Review vs. debug:** on a live failure the agents reproduce it with `dbga`
+  before proposing a fix. On a review/audit task (no failing run) they reason
+  from source but label each finding `RUNTIME-VERIFIED` vs `INSPECTION-ONLY` —
+  treat an `INSPECTION-ONLY` finding as a hypothesis until you've run it.
 
 ## License
 
