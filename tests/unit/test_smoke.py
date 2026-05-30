@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib.metadata import version
 
 
 def test_cli_version() -> None:
@@ -12,4 +13,6 @@ def test_cli_version() -> None:
         timeout=10,
     )
     assert result.returncode == 0
-    assert "0.1.1" in result.stdout
+    # Assert against the installed package version so this never re-stales on a
+    # bump — and so it catches cli.py's hardcoded string drifting from pyproject.
+    assert version("dbga") in result.stdout

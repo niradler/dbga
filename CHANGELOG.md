@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-30
+
+### Added
+
+- **Skill reference backfills for runtime-failure topics** the language skills
+  were missing: Python async **cancellation & timeouts** (`wait_for` /
+  `asyncio.timeout`, `CancelledError` re-raise, the `BaseException` catch trap)
+  and `gather(return_exceptions=True)` semantics; Python **type narrowing**
+  (`X | None` → `X`, `TypeGuard`/`TypeIs`); Node **don't-block-the-event-loop**,
+  pool-exhaustion and lost-async-context pitfalls, plus `Error.captureStackTrace`
+  on the custom error class; `go test -fuzz` on the Go operational checklist.
+
 ### Fixed
 
 - Launch-time **exception filters are now replayed to the child session** for
@@ -26,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code plugin. `npx skills add niradler/dbga --skill debug-agent` still resolves
   it (via the repo-root `.claude-plugin/marketplace.json`); update any manual
   copy path accordingly.
+
+### Removed
+
+- **`plugin/THIRD_PARTY_NOTICES.md`** and its `README` link. The language
+  skills and expert agents are original, inspiration-only derivations rather
+  than substantial copies, so the upstream attribution notice was dropped.
 
 ## [0.1.1] — 2026-05-29
 
