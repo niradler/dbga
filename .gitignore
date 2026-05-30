@@ -14,3 +14,6 @@ tmp/
 # delve (`dlv dap` / `dlv debug`) leaves debug binaries in cwd
 __debug_bin*
 *.test
+
+# local comparison clones (benchmarking only — never committed)
+/_cmp_*/

@@ -44,6 +44,16 @@ async def get_user_data(db: AsyncDB, user_id: int) -> dict:
 
 On 3.11+ prefer `asyncio.TaskGroup` when you want structured concurrency with automatic cancellation of siblings on first failure.
 
+By default `gather` is **fail-fast**: the first exception propagates and the remaining tasks are left running, not awaited. Pass `return_exceptions=True` to collect results *and* exceptions positionally — the call never raises, so you inspect failures yourself:
+
+```python
+results = await asyncio.gather(*tasks, return_exceptions=True)
+ok   = [r for r in results if not isinstance(r, Exception)]
+errs = [r for r in results if isinstance(r, Exception)]
+```
+
+At a breakpoint, check this first when a fan-out returns wrong data: an `Exception` sitting in the results where a value should be.
+
 ## Bound concurrency with a Semaphore
 
 Cap in-flight work so you don't overwhelm a service or exhaust connections.
@@ -97,6 +107,36 @@ class Counter:
         async with self._lock:
             self._value += 1
 ```
+
+## Cancellation & timeouts
+
+The two most common async hangs: a task that never finishes, and a cancelled task that never cleaned up.
+
+**Bound every await that can stall.** `wait_for` cancels the inner task and raises on expiry; `asyncio.timeout()` (3.11+) is the context-manager form for a block:
+
+```python
+try:
+    result = await asyncio.wait_for(fetch(url), timeout=2.0)
+except asyncio.TimeoutError:         # all versions; aliases builtin TimeoutError on 3.11+
+    ...                              # inner task already cancelled
+
+async with asyncio.timeout(2.0):     # 3.11+
+    result = await fetch(url)
+```
+
+**Cancellation is delivered as an exception you must let propagate.** When a task is cancelled, `asyncio.CancelledError` is raised at its current `await`. Catch it only to clean up, then re-raise — swallowing it leaves the task half-cancelled and the canceller hanging:
+
+```python
+async def worker() -> None:
+    try:
+        while True:
+            await do_unit()
+    except asyncio.CancelledError:
+        await release_resources()
+        raise                        # re-raise — never swallow
+```
+
+Since 3.8 `CancelledError` subclasses `BaseException`, so `except Exception:` won't catch it — but a too-broad `except BaseException:` will, a frequent cause of "Ctrl-C / shutdown doesn't work." When a `dbga` session shows a task wedged at an `await` that should have been cancelled, look upstream for a handler eating the `CancelledError`.
 
 ## Debugging async
 

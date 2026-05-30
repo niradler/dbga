@@ -97,6 +97,30 @@ class OnProgress(Protocol):
     def __call__(self, current: int, total: int, *, message: str = "") -> None: ...
 ```
 
+## Narrowing — proving `X | None` is `X`
+
+Most `AttributeError: 'NoneType' object has no attribute …` bugs are a missing narrow: the type is `X | None` and the code touched it without ruling out `None`. Narrow explicitly so mypy *and* the runtime agree:
+
+```python
+def process(user: User | None) -> str:
+    if user is None:
+        raise ValueError("user required")
+    return user.name           # narrowed to User
+
+names = [u.name for u in users if u is not None]   # filter narrows each element
+```
+
+`isinstance` narrows by type; `assert x is not None` narrows inline (but is stripped under `python -O`). For a custom predicate, return `TypeGuard[T]` (3.10+) / `TypeIs[T]` (3.13+) so the narrowing survives across the function boundary:
+
+```python
+from typing import TypeGuard
+
+def all_strings(xs: list[object]) -> TypeGuard[list[str]]:
+    return all(isinstance(x, str) for x in xs)
+```
+
+When a `dbga` stop shows `None` where you expected a value, walk back to the branch that should have narrowed it — the missing guard is the bug.
+
 ## Also reach for
 
 `TypedDict` (structured dicts), `Literal` (constants/enums-lite), `ParamSpec` (decorators preserving signatures), `@overload` (input-dependent return types).

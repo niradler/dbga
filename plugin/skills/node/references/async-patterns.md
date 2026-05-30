@@ -83,9 +83,25 @@ process.on("SIGTERM", () => {
 });
 ```
 
+## Don't block the event loop
+
+Node runs your JS on one thread. A synchronous CPU loop, a huge `JSON.parse`, or `fs.readFileSync` freezes **every** request and timer until it returns — a `dbga` session sits on one line, never advancing, with no error to show. That "next stop never arrives" is the signature of a blocked loop.
+
+```typescript
+// BAD — blocks the loop for the whole hash
+const hash = crypto.pbkdf2Sync(pw, salt, 1_000_000, 64, "sha512");
+
+// GOOD — hand CPU work to the threadpool
+const hash = await promisify(crypto.pbkdf2)(pw, salt, 1_000_000, 64, "sha512");
+```
+
+Offload sustained CPU work to a `worker_thread`; keep the loop free for I/O.
+
 ## Pitfalls
 
 - **Unhandled rejection** — every async call needs an `await` with surrounding `try/catch`, or a `.catch()`. A floating promise swallows failures.
+- **Pool exhaustion** — when every DB connection is checked out, new queries *hang* rather than error. A stuck request with no exception is often a leaked connection; bound and monitor pool size.
+- **Lost async context** — plain variables don't follow execution across callbacks/timers. Use `AsyncLocalStorage` (`node:async_hooks`) to carry request/trace context across `await` hops; prevents "context is undefined in this callback".
 - **`forEach` is not async-aware** — it ignores returned promises; use `for...of` with `await`, or `Promise.all(map(...))`.
 - **Microtask vs timer ordering** — awaited promises (microtasks) drain before `setTimeout` (macrotasks). Don't rely on `setTimeout(0)` for ordering.
 - **`async` in an event handler** that throws → unhandled rejection. Wrap the body.

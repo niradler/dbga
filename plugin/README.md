@@ -84,5 +84,4 @@ the `skills` CLI at `plugin/skills/`, so no `--full-depth` flag is needed.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Upstream attributions in
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+MIT — see [`LICENSE`](LICENSE).

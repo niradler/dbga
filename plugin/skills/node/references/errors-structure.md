@@ -16,6 +16,7 @@ class AppError extends Error {
     super(message);
     this.name = new.target.name;
     Object.setPrototypeOf(this, new.target.prototype);
+    Error.captureStackTrace?.(this, new.target); // V8: drop constructor frames from the trace
   }
 }
 
@@ -26,7 +27,7 @@ class NotFoundError extends AppError {
 }
 ```
 
-Use the built-in `cause` option (`new Error(msg, { cause })`) to chain without losing the original.
+Use the built-in `cause` option (`new Error(msg, { cause })`) to chain without losing the original. `captureStackTrace(this, new.target)` elides the subclass constructor frames, so the trace points at the *throw site*, not the error machinery.
 
 ## Result types — errors as values
 

@@ -30,7 +30,8 @@ evidence-first debugging loop, use the **`debug-agent` skill** and `dbga`.
 1. `gofmt -l .` prints nothing; `go vet ./...` clean.
 2. `golangci-lint run` passes.
 3. `go test -race ./...` — table-driven tests, race detector on, no goroutine
-   leaks.
+   leaks. For parsers/decoders and input boundaries, add a fuzz target
+   (`go test -fuzz`) to surface crash inputs.
 4. Concurrent/fallible paths take `context`; benchmarks for hot paths
    (`go test -bench=. -benchmem`), confirm wins with `pprof`.
 5. Dependency hygiene when touching deps (per `_shared/dependency-hygiene.md`):
